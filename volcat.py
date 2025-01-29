@@ -945,7 +945,7 @@ def check_total_mass(dset):
     # area returned in km2.
     # mass in g/m2
     # 1e6 to convert are to m2
-    # 1e-9 to convert g to Tg
+    # 1e-12 to convert g to Tg
     masstot = mass * area * 1e-6
     masstot = masstot.sum().values
     # return unit is in Tg
