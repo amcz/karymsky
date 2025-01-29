@@ -105,6 +105,16 @@ dset_averaged.plot.pcolormesh(x='longitude',y='latitude')
 
 # In[ ]:
 
+# mass loading
+
+# array with total mass from each time period 
+total_mass=[]
+for d in das:
+    total_mass.append(float(d.ash_mass_loading_total_mass.values)) 
+
+
+
+
 
 
 
