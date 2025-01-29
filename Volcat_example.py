@@ -108,12 +108,16 @@ dset_averaged.plot.pcolormesh(x='longitude',y='latitude')
 # mass loading
 
 # array with total mass from each time period 
+# THis is directly from the volcat files which come with total mass
 total_mass=[]
 for d in das:
     total_mass.append(float(d.ash_mass_loading_total_mass.values)) 
 
 
-
+# another way which multiplies area by mass loading
+# field in data array must be in g/m2.
+# returns mass in Tg
+volcat.check_total_mass(dset_averaged)
 
 
 

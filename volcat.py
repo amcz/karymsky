@@ -17,7 +17,7 @@ import xarray as xr
 import hysplit
 import hysplit_gridutil
 
-import get_area
+from get_area import get_area
 from helperinterface import FileNameInterface
 
 logger = logging.getLogger(__name__)
@@ -384,6 +384,8 @@ def get_volcat_list(
         else:
             das.append(xr.open_dataset(os.path.join(tdir, iii),engine='netcdf4'))
     return das
+
+
 
 
 def write_parallax_corrected_files(
@@ -935,7 +937,10 @@ def get_radius(dset, vname=None, clip=True):
 
 
 def check_total_mass(dset):
-    mass = get_mass(dset)
+    try:
+        mass = get_mass(dset)
+    except:
+        mass = dset
     area = get_area(mass)
     # area returned in km2.
     # mass in g/m2
