@@ -66,7 +66,6 @@ def plot_outdat_ts_psize_function(
     #        part='basic'
 
     if not ax:
-        sns.set()
         sns.set_style("whitegrid")
         fig = plt.figure(fignum, figsize=(10, 5))
         ax = fig.add_subplot(1, 1, 1)
@@ -118,7 +117,6 @@ def plot_emissions_timeseries(
     # plots time series of MER. summed along column.
     # dfdat : pandas dataframe output by InverseOutDat class get_emis method.
     if not ax:
-        sns.set()
         sns.set_style("whitegrid")
         fig = plt.figure(fignum, figsize=(10, 5))
         ax = fig.add_subplot(1, 1, 1)
@@ -127,7 +125,6 @@ def plot_emissions_timeseries(
         df = df.dropna()
     else:
         df = dfdat
-    sns.set()
     if 'psize' in df.columns: df = df.drop("psize", axis=1)
     # dfp = dfp.pivot(index='date',columns='ht')
     df = df.pivot(index="date", columns="ht")
@@ -186,16 +183,36 @@ def plot_emissions_profile(
         yval = np.array(yval) / 1000.0
     if unit == "FL":
         yval = yval * 3280.84 / 100.0
+
+    lw=5
+    alpha=0.5
+    dh = yval[2] - yval[1]
+    # Only plot vertical lines of the step function
+    for i in range(len(xval)):
+        ax.plot([xval[i], xval[i]], [yval[i], yval[i]+dh], 
+                color=clr, 
+                alpha=alpha,
+                linewidth=lw,
+                linestyle="-")
+        if i < len(xval) - 1:
+            ax.plot([xval[i], xval[i+1]], [yval[i]+dh, yval[i]+dh], 
+                color=clr, 
+                alpha=alpha,
+                linewidth=lw,
+                linestyle="-")
+
+    # Add points at the bottom of each step
     ax.plot(
         xval,
         yval,
         color=clr,
         marker=marker,
-        label=label,
+        linestyle="",
+        markersize=6,
         alpha=alpha,
-        linewidth=lw,
-        linestyle="-",
+        label=label
     )
+    
     ax.set_xlabel("Tg of mass emitted", fontsize=15)
     if unit == "FL":
         ax.set_ylabel("Height (FL)", fontsize=15)

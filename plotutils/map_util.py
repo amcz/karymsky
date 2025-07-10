@@ -6,6 +6,7 @@ import cartopy
 from cartopy.mpl.gridliner import LATITUDE_FORMATTER, LONGITUDE_FORMATTER
 import matplotlib.ticker as mticker
 import numpy as np
+import math
 
 
 def setup_figure(fignum=1,rows=1,columns=1,central_longitude=180,figsize=[10,5]):
@@ -182,41 +183,65 @@ class PlotParams:
 
 def set_xticks(xmin,xmax,nticks):
     # xticks go from positive (west) to negative (east)
-    if xmin<0 and xmax>0:
-       xticks = set_ticks_dateline(xmax,xmin,nticks)
-    elif xmin>0 and xmax<0:
+    # Handle dateline crossing cases
+    if xmin < 0 and xmax > 0:
+       # Data crosses dateline (e.g., -170 to 170)
+       xticks = set_ticks_dateline(xmin,xmax,nticks)
+    elif xmin > 0 and xmax < 0:
+       # Reversed dateline crossing (e.g., 170 to -170)
        xticks = set_ticks_dateline(xmin,xmax,nticks)
     elif xmax < xmin:
-       xticks = set_ticks_normal(xmax,xmin,nticks)
+       # For central_longitude=180, this is normal (e.g., 170 to -170)
+       xticks = set_ticks_dateline(xmin,xmax,nticks)
     else:
+       # Normal case, no dateline crossing
        xticks = set_ticks_normal(xmin,xmax,nticks)
     return xticks
 
 def set_ticks_dateline(xmin,xmax,nticks=3):
-    # transform to 0 to 360 coordinates
-    xlimits = [x+360 if x<0 else x for x in [xmin,xmax]]
-    xticks = set_ticks_normal(xlimits[0],xlimits[1])
-    # transform back to -180 to 180 coordinates
-    xticks = [x-360 if x>180 else x for x in xticks]
+    # Handle dateline crossing for central_longitude=180
+    # When central_longitude=180, coordinates can range from -180 to 180
+    # but data near dateline might be like 170 to -170 (crossing dateline)
+    
+    if xmax < xmin:
+        # Case: xmin=170, xmax=-170 (crossing dateline)
+        # Convert to continuous range: 170 to 190
+        xmax_adjusted = xmax + 360
+        xticks = set_ticks_normal(xmin, xmax_adjusted, nticks)
+        # Convert back: any tick > 180 should be negative
+        xticks = [x - 360 if x > 180 else x for x in xticks]
+    else:
+        # Normal case: both negative or both positive, or normal range
+        if xmin < 0 and xmax > 0:
+            # Case: -170 to 170 (spans dateline)
+            # This is a normal span, no conversion needed
+            xticks = set_ticks_normal(xmin, xmax, nticks)
+        else:
+            # Transform to 0 to 360 coordinates for calculation
+            xlimits = [x + 360 if x < 0 else x for x in [xmin, xmax]]
+            xticks = set_ticks_normal(xlimits[0], xlimits[1], nticks)
+            # Transform back to -180 to 180 coordinates
+            xticks = [x - 360 if x > 180 else x for x in xticks]
+    
     return xticks
 
 
 def set_ticks_normal(xmin,xmax,nticks=3):
     # if the span is less than one degree
     if np.abs(xmax-xmin) > 1:
-       first = np.floor(xmin)
-       last = np.ceil(xmax)
+       first = math.floor(xmin)
+       last = math.ceil(xmax)
     # round to nearest tenth of degree
     else:
-       first = np.floor(xmin*10)/10
-       last = np.ceil(xmax*10)/10
+       first = math.floor(xmin*10)/10
+       last = math.ceil(xmax*10)/10
     span = last-first
     dx = span/nticks
     # round to nearest 5 if greater than 10
     if np.abs(dx) > 10:
        dx = int(int(dx/5.0)*5)
     elif np.abs(dx) > 1:
-       dx = int(np.floor(dx))
+       dx = int(math.floor(dx))
     elif dx > 0.1:
        dx = int(dx*10)/10.0
     rticks = np.arange(first,last+dx,dx)

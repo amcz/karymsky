@@ -82,13 +82,15 @@ class BaseNetCDF:
         d = datetime.datetime(2021, 11, 3, 8)
         dlist = [d]
         dlist.append(datetime.datetime(2021, 11, 3, 9))
-        for iii in np.arange(3, 12, 3):
-            dt = datetime.timedelta(hours=int(iii + 1))
-            dlist.append(d + dt)
+        dlist.append(datetime.datetime(2021, 11, 3, 12))
+        #for iii in np.arange(3, 12, 3):
+        #    dt = datetime.timedelta(hours=int(iii + 1))
+        #    dlist.append(d + dt)
         d = dlist[-1]
         for iii in np.arange(6, 50, 6):
             dt = datetime.timedelta(hours=int(iii))
             dlist.append(d + dt)
+            print(d+dt)
         return dlist
 
 class MetOffice(BaseNetCDF):
@@ -206,8 +208,9 @@ class NOAA(BaseNetCDF):
         dict: Dictionary mapping dates to filenames.
         """
         namehash = {}
-        for ddd in self.forecast_times():
-            dstr = ddd.strftime("%Y%m%d%H%M")
+        for iii, ddd in enumerate(self.forecast_times()):
+            #dstr = ddd.strftime("%Y%m%d%H%M")
+            dstr = 'forecast_{}'.format(iii)
             namehash[ddd] = f'HYSPLIT_inv_{dstr}.nc'
         return namehash
 
@@ -261,6 +264,7 @@ class NoaaHelper(DsetHelper):
         xarray.DataArray: The mass loading.
         """
         mass = self.dset.HYSPLIT.sel(time=time)
+        # NOAA concentrations are in g/m3. 
         mass = mass * 1.524e3  # multiply by height of grid cell in meters.
         return mass.isel(ens=0, source=0).sum(dim='z')
 
@@ -313,6 +317,9 @@ class BomHelper(DsetHelper):
     def massload(self, time):
         """
         Calculate the mass loading for a specific time.
+        BOM concentrations are in mg/m3.
+        This method multiplies the concentration by the height of the grid cell in meters.
+        but then must divide by 1000 to convert to g/m2
 
         Parameters:
         time (datetime): The time for which to calculate the mass loading.
@@ -323,8 +330,11 @@ class BomHelper(DsetHelper):
         t = self.convert_time(time)
         if t >= 0:
             mass = self.dset.concentration.isel(time=t)
-        mass = mass * 1.524  # multiply by height of grid cell in meters.
-        return mass.sum(dim='levels')
+            mass = mass * 1.524  # multiply by height of grid cell in meters and divide by 1000 to convert to g/m2.
+            return mass.sum(dim='levels')
+        else:
+            # Return None or empty array if time not found
+            return None
 
 class MetOfficeHelper(DsetHelper):
     """
@@ -362,7 +372,7 @@ class MetOfficeHelper(DsetHelper):
         xarray.DataArray: The mass loading.
         """
         mass = self.concentration(time)
-        mass = mass * 1.524  # multiply by height of grid cell in meters.
+        mass = mass * 1.524  # multiply by height of grid cell in meters and divide by 1000 to convert to g/m2.
         return mass.sum(dim='flight_level')
 
     def concentration(self, time):
@@ -452,7 +462,7 @@ def format_cdf_plot(ax, title=''):
     ax.set_ylabel('CDF')
     handles, labels = ax.get_legend_handles_labels()
     ax.legend(handles, labels)
-    plt.title(title)
+    ax.set_title(title)
 
 class Comparison:
     """
@@ -474,6 +484,10 @@ class Comparison:
         self.bom = Bom(bomdir)
         self.volcat = VolcatData(volcatdir)
         self.datahash = {}
+      
+    @property
+    def forecast_times(self):
+        return self.noaa.forecast_times()
 
     @property   
     def vloc(self):
@@ -542,34 +556,73 @@ class Comparison:
         """
         import matplotlib.colors as mcolors
         data = self.datahash[date]
-        fig, axlist = map_util.setup_figure(fignum=1, rows=2, columns=2, central_longitude=0)
+        fig, axlist = map_util.setup_figure(fignum=1, rows=2, columns=2, central_longitude=180)
         axlist = axlist.flatten()
-        transform = map_util.data_transform()
-        norm = mcolors.LogNorm(vmin=0.01, vmax=100)
-        norm = mcolors.Normalize(vmin=0.01, vmax=100)
-        for iii, key in enumerate(data.keys()):
+        # Use the same transform as the map projection
+        transform = map_util.get_transform(central_longitude=0)  # Data coordinates are still 0-360 or -180/180
+        
+        # Calculate global bounds across all datasets
+        all_masses = []
+        for key in data.keys():
             mass = data[key].massload(fdate)
             mass = xr.where(mass < 0.01, np.nan, mass)
-            massmax = np.nanmax(mass.values)
-            if massmax > 10:
-                bounds = [0.01, 0.2, 2, 5, 10, np.max(mass)]
-            else:
-                bounds = [0.01, 0.2, 2, 5, 9.90, 10]
-            norm = mcolors.BoundaryNorm(boundaries=bounds, ncolors=5)
-            cmap = plt.get_cmap('viridis', 5)
+            all_masses.append(np.nanmax(mass.values))
+        
+        global_max = np.max(all_masses)
+        if global_max > 10:
+            bounds = [0.01, 0.2, 2, 5, 10, global_max]
+        else:
+            bounds = [0.01, 0.2, 2, 5, 9.90, 10]
+        
+        norm = mcolors.BoundaryNorm(boundaries=bounds, ncolors=5)
+        cmap = plt.get_cmap('viridis', 5)
+        
+        # Store the pcolormesh objects for colorbar
+        pcolormesh_obj = None
+        
+        for iii, key in enumerate(data.keys()):
+            print(iii, key)
+            mass = data[key].massload(fdate)
+            mass = xr.where(mass < 0.01, np.nan, mass)
+            
             if key == 'volcat':
                 lat = mass.latitude.values
                 lon = mass.longitude.values
             else:
                 lat = data[key].latitude
                 lon = data[key].longitude
-            cb = axlist[iii].pcolormesh(lon, lat, mass.values, cmap=cmap, norm=norm, transform=transform)
+            
+            # Keep data coordinates as they are - don't transform longitude
+            # The transform parameter handles the projection conversion
+            pcolormesh_obj = axlist[iii].pcolormesh(lon, lat, mass.values, cmap=cmap, norm=norm, transform=transform)
             axlist[iii].plot(self.vloc[0],self.vloc[1],transform=transform,marker='^',color='r',markersize=10)
+            # Place the text in the upper left corner
+            lbl = key.upper()
+
+            axlist[iii].text(0.05, 0.95, lbl , transform=axlist[iii].transAxes, fontsize=12, color='k', va='top')
+
+            # Set extent based on forecast time and transformed coordinates
             if fdate == datetime.datetime(2021, 11, 3, 12):
-                axlist[iii].set_xlim(150, 170)
-                axlist[iii].set_ylim(50, 56)
+                # For T+0, focus on source region
+                axlist[iii].set_extent([150, 170, 50, 56], crs=transform)
+            elif fdate > datetime.datetime(2021, 11, 3, 18):
+                # For later times, show wider area as plume spreads
+                axlist[iii].set_extent([150, 190, 48, 56], crs=transform)
             else:
-                axlist[iii].set_xlim(150, 180)
-                axlist[iii].set_ylim(48, 56)
-            fig.colorbar(cb, ax=axlist[iii], label='Mass Loading')
+                # Default extent for intermediate times
+                axlist[iii].set_extent([150, 180, 48, 56], crs=transform)
+            
+            axlist[iii].set_xlabel('Longitude')
             map_util.format_plot(axlist[iii], transform, fsz=12)
+        
+        # Create a dedicated axis for the colorbar
+        if pcolormesh_obj is not None:
+            # Add space for colorbar on the right
+            plt.subplots_adjust(right=0.85)
+            # Create a new axis for the colorbar positioned to the right of the subplots
+            cbar_ax = fig.add_axes([0.87, 0.15, 0.03, 0.7])  # [left, bottom, width, height]
+            fig.colorbar(pcolormesh_obj, cax=cbar_ax, label='Mass Loading (g m$^{-2}$)')
+        
+        axlist[0].set_title(f'{fdate.strftime("%Y-%m-%d %H:%M")}')
+        
+        return fig, axlist
