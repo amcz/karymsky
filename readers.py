@@ -512,6 +512,7 @@ class VolcatData:
         """
         self.tdir = tdir
         self.datahash = {}
+        self.hthash = {}
 
     def get(self, date):
         """
@@ -525,8 +526,13 @@ class VolcatData:
         for t in tlist:
             d1 = d0 + datetime.timedelta(hours=t)
             d2 = d1 + datetime.timedelta(hours=1)
-            mass = volcat_mass(self.tdir, d1, d2)
+            mass, ht = volcat_mass(self.tdir, d1, d2)
             self.datahash[d1] = mass
+            self.hthash[d1] = ht
+
+    
+    def height(self,time):
+        return self.hthash[time]     
 
     def massload(self, time):
         """
