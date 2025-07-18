@@ -530,6 +530,16 @@ class VolcatData:
             self.datahash[d1] = mass
             self.hthash[d1] = ht
 
+    def vertical_slice(self,time,latitude):
+        ht = self.hthash[time]
+        lats = ht.latitude.isel(x=0).values
+        ldiff = np.abs(lats-latitude)
+        idx = np.argmin(ldiff)
+        print(idx)
+        htvalue = ht.isel(y=idx)  
+        # heiths are in km. convert to FL. 3.28084*1000/100
+        return htvalue.longitude.values, htvalue.values*32.8084
+
     
     def height(self,time):
         return self.hthash[time]     
