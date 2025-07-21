@@ -535,10 +535,20 @@ class VolcatData:
         lats = ht.latitude.isel(x=0).values
         ldiff = np.abs(lats-latitude)
         idx = np.argmin(ldiff)
-        print(idx)
         htvalue = ht.isel(y=idx)  
-        # heiths are in km. convert to FL. 3.28084*1000/100
-        return htvalue.longitude.values, htvalue.values*32.8084
+        
+        # Get longitude and height values
+        lon_values = htvalue.longitude.values
+        # Heights are in km. convert to FL. 3.28084*1000/100
+        ht_values = htvalue.values * 32.8084
+        
+        # Filter out NaN height values
+        valid_mask = ~np.isnan(ht_values)
+        lon_filtered = lon_values[valid_mask]
+        ht_filtered = ht_values[valid_mask]
+        
+        print(f"Original points: {len(lon_values)}, Valid points: {len(lon_filtered)}")
+        return lon_filtered, ht_filtered
 
     
     def height(self,time):
@@ -733,7 +743,7 @@ class Comparison:
         
         return fig, axlist
 
-    def plot_vertical_slices(self, date, time, latitude_target, figsize=(15, 10), 
+    def plot_vertical_slices(self, date, time, latitude_target, figsize=(15, 8), 
                            min_conc=1e-6, log_scale=True, cmap='viridis'):
         """
         Plot vertical slices for all available datasets at a specific latitude.
@@ -755,23 +765,21 @@ class Comparison:
         
         data = self.datahash[date]
         available_datasets = [key for key in data.keys() if key != 'volcat']
-        
+
+        volcat = data['volcat']
+        vlon, vht = volcat.vertical_slice(time, latitude_target)
+        print(len(vlon), vlon)
+        print(vht)
         if not available_datasets:
             print("No datasets with vertical levels available")
             return None, None
         
         # Create subplots
-        n_datasets = len(available_datasets)
-        ncols = min(2, n_datasets)
-        nrows = (n_datasets + ncols - 1) // ncols
-        
-        fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
-        if n_datasets == 1:
-            axes = [axes]
-        elif nrows == 1:
-            axes = [axes] if ncols == 1 else axes
-        else:
-            axes = axes.flatten()
+        ncols = 3
+        nrows = 1
+        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
+        #fig.suptitle(f'Vertical Cross-Sections at {latitude_target}°N\n{time.strftime("%Y-%m-%d %H:%M")}', fontsize=14)
+        axes = axes.flatten()
        
         xmin=360
         xmax=-360
@@ -797,7 +805,6 @@ class Comparison:
                         cb = ax.pcolormesh(lon,alt,conc_2d)
                         print(f"  {key}: Setting labels and title...")
                         ax.set_xlabel('Longitude (°)', fontsize=12)
-                        ax.set_ylabel('Altitude (m)', fontsize=12)
                         fig.colorbar(cb, ax=ax, label='Concentration (g/m³)', orientation='vertical')
                         #ax.set_title(f'{key.upper()}\nLat: {actual_lat:.2f}°N', fontsize=12)
                         #ax.grid(True, alpha=0.3)
@@ -809,6 +816,8 @@ class Comparison:
                         if bbox['alt_max'] > ymax: ymax = bbox['alt_max']
                         #ax.set_xlim(bbox['lon_min'],bbox['lon_max'])
                         #ax.set_ylim(0,bbox['alt_max']+50) 
+                        ax.plot(vlon, vht, '--ro', label='Volcat', linewidth=2, markersize=5)
+                        ax.set_title(f'{key.upper()}\nLat: {actual_lat:.2f}°N', fontsize=12)
                     else:
                         print(f"  {key}: No data available")
                         ax.text(0.5, 0.5, f'No data available\nfor {key.upper()}', 
@@ -822,10 +831,11 @@ class Comparison:
                     ax.text(0.5, 0.5, f'Error plotting {key.upper()}:\n{str(e)[:50]}...', 
                            transform=ax.transAxes, ha='center', va='center')
                     ax.set_title(f'{key.upper()}\nError', fontsize=12)
-                ax.set_xlim(xmin,xmax)
-                ax.set_ylim(ymin,ymax) 
-                
-        
+                ax.set_xlim(xmin-2,xmax+2)
+                ax.set_ylim(ymin,ymax+100) 
+
+
+        axes[0].set_ylabel('Altitude (FL)', fontsize=12)
         # Hide unused subplots
         #for i in range(n_datasets, len(axes)):
         #    axes[i].set_visible(False)
@@ -1122,184 +1132,3 @@ def get_vertical_slice_bounding_box(lon, alt, conc_2d, threshold):
             'alt_idx_max': alt_idx_max
         }
     }
-
-def plot_vertical_slice_with_bbox(lon, alt, conc_2d, threshold, actual_lat=None, 
-                                 title=None, ax=None, figsize=(12, 8), 
-                                 log_scale=True, cmap='viridis'):
-    """
-    Plot vertical slice with bounding box overlay around above-threshold values.
-    
-    Parameters:
-    lon (array): Longitude coordinates
-    alt (array): Altitude coordinates
-    conc_2d (array): 2D concentration data
-    threshold (float): Threshold for bounding box
-    actual_lat (float): Actual latitude of the slice (for title)
-    title (str): Plot title (optional)
-    ax (matplotlib.axes): Existing axes (optional)
-    figsize (tuple): Figure size if creating new figure
-    log_scale (bool): Use logarithmic color scale
-    cmap (str): Colormap name
-    
-    Returns:
-    tuple: (fig, ax, bbox_dict)
-    """
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
-    
-    # Create figure if not provided
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
-    
-    # Get bounding box
-    bbox = get_vertical_slice_bounding_box(lon, alt, conc_2d, threshold)
-    
-    # Ensure proper data orientation for plotting
-    if conc_2d.shape == (len(alt), len(lon)):
-        conc_2d = conc_2d.T
-    
-    # Mask values below threshold for visualization
-    min_conc = threshold * 0.1  # Show some values below threshold for context
-    conc_masked = np.where(conc_2d > min_conc, conc_2d, np.nan)
-    
-    # Set up color scale
-    if log_scale:
-        try:
-            from matplotlib.colors import LogNorm
-            norm = LogNorm(vmin=min_conc, vmax=np.nanmax(conc_masked))
-        except:
-            import matplotlib.colors as mcolors
-            norm = mcolors.LogNorm(vmin=min_conc, vmax=np.nanmax(conc_masked))
-    else:
-        try:
-            from matplotlib.colors import Normalize
-            norm = Normalize(vmin=min_conc, vmax=np.nanmax(conc_masked))
-        except:
-            import matplotlib.colors as mcolors
-            norm = mcolors.Normalize(vmin=min_conc, vmax=np.nanmax(conc_masked))
-    
-    # Create the plot
-    im = ax.pcolormesh(lon, alt, conc_2d, cmap=cmap, norm=norm, shading='nearest')
-    
-    # Add bounding box if values above threshold were found
-    if bbox['found']:
-        rect = patches.Rectangle(
-            (bbox['lon_min'], bbox['alt_min']),
-            bbox['lon_max'] - bbox['lon_min'],
-            bbox['alt_max'] - bbox['alt_min'],
-            linewidth=2, edgecolor='red', facecolor='none',
-            label=f'Above {threshold:.1e}'
-        )
-        ax.add_patch(rect)
-        ax.legend()
-        
-        # Add text with bounding box info
-        info_text = (f"Threshold: {threshold:.1e}\n"
-                    f"Lon: {bbox['lon_min']:.1f}° to {bbox['lon_max']:.1f}°\n"
-                    f"Alt: {bbox['alt_min']:.0f} to {bbox['alt_max']:.0f} FL")
-        ax.text(0.02, 0.98, info_text, transform=ax.transAxes, 
-               bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
-               verticalalignment='top', fontsize=10)
-    
-    # Add colorbar
-    cbar = plt.colorbar(im, ax=ax)
-    cbar.set_label('Concentration (mg/m³)', fontsize=12)
-    
-    # Set labels and title
-    ax.set_xlabel('Longitude (°)', fontsize=12)
-    ax.set_ylabel('Flight Level', fontsize=12)
-    
-    if title is None:
-        if actual_lat is not None:
-            title = f'Vertical Cross-Section at {actual_lat:.2f}°N'
-        else:
-            title = 'Vertical Cross-Section'
-    ax.set_title(title, fontsize=14)
-    
-    ax.grid(True, alpha=0.3)
-    
-    return fig, ax, bbox
-
-    def plot_vertical_slices_with_bboxes(self, date, time, latitude_target, threshold,
-                                       figsize=(15, 10), log_scale=True, cmap='viridis'):
-        """
-        Plot vertical slices with bounding boxes for all datasets.
-        
-        Parameters:
-        date (datetime): Issue date of the forecast
-        time (datetime): Forecast time
-        latitude_target (float): Target latitude for the slice
-        threshold (float): Concentration threshold for bounding boxes
-        figsize (tuple): Figure size
-        log_scale (bool): Use logarithmic color scale
-        cmap (str): Colormap name
-        
-        Returns:
-        tuple: (fig, axes, bbox_results)
-        """
-        if date not in self.datahash:
-            self.get(date)
-        
-        data = self.datahash[date]
-        available_datasets = [key for key in data.keys() if key != 'volcat']
-        
-        if not available_datasets:
-            print("No datasets with vertical levels available")
-            return None, None, None
-        
-        # Create subplots
-        n_datasets = len(available_datasets)
-        ncols = min(2, n_datasets)
-        nrows = (n_datasets + ncols - 1) // ncols
-        
-        fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
-        if n_datasets == 1:
-            axes = [axes]
-        elif nrows == 1:
-            axes = [axes] if ncols == 1 else axes
-        else:
-            axes = axes.flatten()
-        
-        bbox_results = {}
-        
-        # Plot each dataset with bounding box
-        for i, key in enumerate(available_datasets):
-            if i < len(axes):
-                ax = axes[i]
-                helper = data[key]
-                
-                try:
-                    lon, alt, conc_2d, actual_lat = helper.vertical_slice(time, latitude_target)
-                    
-                    if conc_2d is not None:
-                        # Plot with bounding box
-                        fig_temp, ax_temp, bbox = plot_vertical_slice_with_bbox(
-                            lon, alt, conc_2d, threshold, actual_lat,
-                            title=f'{key.upper()}\nLat: {actual_lat:.2f}°N',
-                            ax=ax, log_scale=log_scale, cmap=cmap
-                        )
-                        bbox_results[key] = bbox
-                    else:
-                        ax.text(0.5, 0.5, f'No data available\nfor {key.upper()}', 
-                               transform=ax.transAxes, ha='center', va='center')
-                        ax.set_title(f'{key.upper()}\nNo data', fontsize=12)
-                        bbox_results[key] = {'found': False}
-                
-                except Exception as e:
-                    ax.text(0.5, 0.5, f'Error plotting {key.upper()}:\n{str(e)[:50]}...', 
-                           transform=ax.transAxes, ha='center', va='center')
-                    ax.set_title(f'{key.upper()}\nError', fontsize=12)
-                    bbox_results[key] = {'found': False, 'error': str(e)}
-        
-        # Hide unused subplots
-        for i in range(n_datasets, len(axes)):
-            axes[i].set_visible(False)
-        
-        plt.suptitle(f'Vertical Cross-Sections with Bounding Boxes\n'
-                    f'Lat: {latitude_target}°N, Threshold: {threshold:.1e}\n'
-                    f'{time.strftime("%Y-%m-%d %H:%M")}', fontsize=14)
-        plt.tight_layout()
-        
-        return fig, axes, bbox_results
