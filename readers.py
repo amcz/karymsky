@@ -5,6 +5,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+import pandas as pd
 
 import get_area
 from compare_hysplit_volcat import volcat_mass
@@ -263,6 +264,10 @@ class NoaaHelper(DsetHelper):
         Returns:
         xarray.DataArray: The mass loading.
         """
+        timevalues = [pd.to_datetime(x) for x in self.dset.HYSPLIT.time.values]
+        if time not in timevalues:
+           print('NOAA time not available', time, timevalues)
+
         mass = self.dset.HYSPLIT.sel(time=time)
         # NOAA concentrations are in g/m3. 
         mass = mass * 1.524e3  # multiply by height of grid cell in meters.
@@ -282,9 +287,13 @@ class NoaaHelper(DsetHelper):
         """
         # Get 3D concentration data
         mass_4d = self.dset.HYSPLIT.sel(time=time)
-       
-        # finds closest lat 
-        lats = self.dset.HYSPLIT.latitude.isel(x=0).values       
+        
+        # Find closest latitude
+        lats = self.dset.HYSPLIT.isel(x=0).values 
+        #lats = self.latitude
+        #if lats.ndim > 1:
+        #    lats = lats[:, 0] if lats.shape[1] < lats.shape[0] else lats[0, :]
+        
         lat_diff = np.abs(lats - latitude_target)
         lat_idx = np.argmin(lat_diff)
         actual_lat = lats[lat_idx]
@@ -305,7 +314,7 @@ class NoaaHelper(DsetHelper):
         # Extract vertical slice - NOAA uses 'y' dimension for latitude
         conc_slice = mass_4d.isel(ens=0, source=0, y=lat_idx)
        
-        # HYSPLIT output is in g/m3 return in mg/m3 
+        # hysplit output in g/m3 return in mg/m3 
         return lons, alt, conc_slice.values*1000, actual_lat
 
     def vertical_profile(self, time, longitude_target, latitude_target, tolerance=0.5):
@@ -514,21 +523,11 @@ class VolcatData:
         self.datahash = {}
         self.hthash = {}
 
-    def get(self, date):
+    def reset(self):
         """
-        Get the Volcat data for a specific date.
-
-        Parameters:
-        date (datetime): The date for which to get the data.
+        Reset the data hash to empty.
         """
-        d0 = date
-        tlist = [0, 3, 6, 9, 12, 15, 18, 24]
-        for t in tlist:
-            d1 = d0 + datetime.timedelta(hours=t)
-            d2 = d1 + datetime.timedelta(hours=1)
-            mass, ht = volcat_mass(self.tdir, d1, d2)
-            self.datahash[d1] = mass
-            self.hthash[d1] = ht
+        self.datahash = {}
 
     def vertical_slice(self,time,latitude):
         ht = self.hthash[time]
@@ -553,6 +552,33 @@ class VolcatData:
     
     def height(self,time):
         return self.hthash[time]     
+ 
+
+
+    def get(self, date):
+        """
+        Get the Volcat data for a specific date.
+
+        Parameters:
+        date (datetime): The date for which to get the data.
+        """
+        d0 = date
+        tlist = [0, 3, 6, 9, 12, 15, 18,24]
+        #tlist = [0,3] 
+        # Check if data for this date has already been loaded
+        times_to_load = []
+        for t in tlist:
+            d1 = d0 + datetime.timedelta(hours=t)
+            if d1 not in self.datahash:
+                times_to_load.append((t, d1))
+        
+        # Only load data that hasn't been loaded yet
+        for t, d1 in times_to_load:
+            d2 = d1 + datetime.timedelta(hours=1)
+            print('Looking for', d1, d2)
+            mass, ht = volcat_mass(self.tdir, d1, d2)
+            self.datahash[d1] = mass
+            self.hthash[d1] = ht
 
     def massload(self, time):
         """
@@ -624,6 +650,12 @@ class Comparison:
         clr['volcat'] = 'k'
         return clr
 
+    def reset(self):
+        """
+        Reset the data hash.
+        """
+        self.datahash = {}
+
     def get(self, date):
         """
         Get the data for a specific date.
@@ -631,6 +663,11 @@ class Comparison:
         Parameters:
         date (datetime): The date for which to get the data.
         """
+        # Check if data for this date has already been loaded
+        if date in self.datahash:
+            print(f"Data for {date} already loaded, skipping...")
+            return
+            
         self.datahash[date] = {}
         self.datahash[date]['noaa'] = self.noaa.get(date)
         self.datahash[date]['metoffice'] = metoffice_data = self.metoffice.get(date)
@@ -679,25 +716,32 @@ class Comparison:
         
         # Calculate global bounds across all datasets
         all_masses = []
-        for key in data.keys():
+        keylist = data.keys()
+        keylist = [x for x in keylist if 'volcat' not in x]
+        for key in keylist:
+            #print(list(data[key].massload.keys()))
             mass = data[key].massload(fdate)
             mass = xr.where(mass < 0.01, np.nan, mass)
             all_masses.append(np.nanmax(mass.values))
-        
+        #vmass = data['volcat'].datahash[fdate]
+        #all_masses.append(np.nanmax(vmass.values))
+              
+ 
+ 
         global_max = np.max(all_masses)
         if global_max > 10:
-            bounds = [0.01, 0.2, 2, 5, 10, global_max]
+            bounds = [0.01,0.05, 0.2, 2, 5, 10, global_max]
         else:
-            bounds = [0.01, 0.2, 2, 5, 9.90, 10]
+            bounds = [0.01,0.05, 0.2, 2, 5, 9.90, 10]
         
-        norm = mcolors.BoundaryNorm(boundaries=bounds, ncolors=5)
+        norm = mcolors.BoundaryNorm(boundaries=bounds, ncolors=len(bounds))
         cmap = plt.get_cmap('viridis', 5)
         
         # Store the pcolormesh objects for colorbar
         pcolormesh_obj = None
-        
-        for iii, key in enumerate(data.keys()):
-            print(iii, key)
+        keylist.append('volcat')       
+ 
+        for iii, key in enumerate(keylist):
             mass = data[key].massload(fdate)
             mass = xr.where(mass < 0.01, np.nan, mass)
             
@@ -743,7 +787,7 @@ class Comparison:
         
         return fig, axlist
 
-    def plot_vertical_slices(self, date, time, latitude_target, figsize=(15, 8), 
+    def plot_vertical_slices(self, date, time, latitude_target, figsize=(15, 10), 
                            min_conc=1e-6, log_scale=True, cmap='viridis'):
         """
         Plot vertical slices for all available datasets at a specific latitude.
@@ -765,26 +809,24 @@ class Comparison:
         
         data = self.datahash[date]
         available_datasets = [key for key in data.keys() if key != 'volcat']
-
-        volcat = data['volcat']
-        vlon, vht = volcat.vertical_slice(time, latitude_target)
-        print(len(vlon), vlon)
-        print(vht)
+        
         if not available_datasets:
             print("No datasets with vertical levels available")
             return None, None
         
         # Create subplots
-        ncols = 3
-        nrows = 1
-        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
-        #fig.suptitle(f'Vertical Cross-Sections at {latitude_target}°N\n{time.strftime("%Y-%m-%d %H:%M")}', fontsize=14)
-        axes = axes.flatten()
-       
-        xmin=360
-        xmax=-360
-        ymax=100
-        ymin=0 
+        n_datasets = len(available_datasets)
+        ncols = min(2, n_datasets)
+        nrows = (n_datasets + ncols - 1) // ncols
+        
+        fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
+        if n_datasets == 1:
+            axes = [axes]
+        elif nrows == 1:
+            axes = [axes] if ncols == 1 else axes
+        else:
+            axes = axes.flatten()
+        
         # Plot each dataset
         for i, key in enumerate(available_datasets):
             if i < len(axes):
@@ -793,56 +835,59 @@ class Comparison:
                 
                 try:
                     # Get vertical slice data
-                    print(f"Getting vertical slice data for {key}...")
-                    try:
-                        lon, alt, conc_2d, actual_lat = helper.vertical_slice(time, latitude_target)
-                        print(f"  {key}: Got data - lon shape: {lon.shape}, alt shape: {alt.shape}, conc_2d shape: {conc_2d.shape if conc_2d is not None else 'None'}")
-                    except Exception as e:
-                        print(f"  {key}: Error getting vertical slice data: {e}")
-                        raise
-                    
+                    lon, alt, conc_2d, actual_lat = helper.vertical_slice(time, latitude_target)
+                except:
+                    print('problem with vertical slice for', key) 
+                try:           
                     if conc_2d is not None:
-                        cb = ax.pcolormesh(lon,alt,conc_2d)
-                        print(f"  {key}: Setting labels and title...")
+                        # Create meshgrid for plotting
+                        lon_mesh, alt_mesh = np.meshgrid(lon, alt)
+                        
+                        # Mask values below minimum concentration
+                        conc_masked = np.where(conc_2d.T > min_conc, conc_2d.T, np.nan)
+                        
+                        # Set up color scale
+                        if log_scale:
+                            from matplotlib.colors import LogNorm
+                            norm = LogNorm(vmin=min_conc, vmax=np.nanmax(conc_masked))
+                        else:
+                            norm = plt.Normalize(vmin=min_conc, vmax=np.nanmax(conc_masked))
+
+                except: 
+                        print('problem with plotting for', key)     
+                        # Create the plot
+                try:
+                        im = ax.pcolormesh(lon_mesh, alt_mesh, conc_masked, 
+                                          cmap=cmap, norm=norm, shading='auto')
+                        
+                except:
+                        print('problem with pcolormesh') 
+                try:
+                               # Add colorbar
+                        cbar = plt.colorbar(im, ax=ax)
+                        cbar.set_label('Concentration (g/m³)', fontsize=10)
+                        
+                        # Set labels and title
                         ax.set_xlabel('Longitude (°)', fontsize=12)
-                        fig.colorbar(cb, ax=ax, label='Concentration (g/m³)', orientation='vertical')
-                        #ax.set_title(f'{key.upper()}\nLat: {actual_lat:.2f}°N', fontsize=12)
-                        #ax.grid(True, alpha=0.3)
-                        #print(f"  {key}: Plot completed successfully")
-      
-                        bbox = get_vertical_slice_bounding_box(lon,alt,conc_2d,0.01)
-                        if bbox['lon_min'] < xmin: xmin = bbox['lon_min']
-                        if bbox['lon_max'] > xmax: xmax = bbox['lon_max']
-                        if bbox['alt_max'] > ymax: ymax = bbox['alt_max']
-                        #ax.set_xlim(bbox['lon_min'],bbox['lon_max'])
-                        #ax.set_ylim(0,bbox['alt_max']+50) 
-                        ax.plot(vlon, vht, '--ro', label='Volcat', linewidth=2, markersize=5)
+                        ax.set_ylabel('Altitude (m)', fontsize=12)
                         ax.set_title(f'{key.upper()}\nLat: {actual_lat:.2f}°N', fontsize=12)
-                    else:
-                        print(f"  {key}: No data available")
+                        ax.grid(True, alpha=0.3)
                         ax.text(0.5, 0.5, f'No data available\nfor {key.upper()}', 
                                transform=ax.transAxes, ha='center', va='center')
                         ax.set_title(f'{key.upper()}\nNo data', fontsize=12)
                 
                 except Exception as e:
-                    print(f"  {key}: Final error: {e}")
-                    import traceback
-                    traceback.print_exc()
                     ax.text(0.5, 0.5, f'Error plotting {key.upper()}:\n{str(e)[:50]}...', 
                            transform=ax.transAxes, ha='center', va='center')
                     ax.set_title(f'{key.upper()}\nError', fontsize=12)
-                ax.set_xlim(xmin-2,xmax+2)
-                ax.set_ylim(ymin,ymax+100) 
-
-
-        axes[0].set_ylabel('Altitude (FL)', fontsize=12)
-        # Hide unused subplots
-        #for i in range(n_datasets, len(axes)):
-        #    axes[i].set_visible(False)
         
-        #plt.suptitle(f'Vertical Cross-Sections at {latitude_target}°N\n{time.strftime("%Y-%m-%d %H:%M")}', 
-        #             fontsize=14)
-        #plt.tight_layout()
+        # Hide unused subplots
+        for i in range(n_datasets, len(axes)):
+            axes[i].set_visible(False)
+        
+        plt.suptitle(f'Vertical Cross-Sections at {latitude_target}°N\n{time.strftime("%Y-%m-%d %H:%M")}', 
+                     fontsize=14)
+        plt.tight_layout()
         return fig, axes
 
     def plot_vertical_profiles(self, date, time, longitude_target, latitude_target, 
@@ -955,7 +1000,14 @@ class MetOfficeHelper(DsetHelper):
         """
         time = time + datetime.timedelta(hours=1)
         t = np.datetime64(time)
-        conc = self.dset.volcanic_ash_air_concentration.sel(time=t)
+        tvals = self.dset.volcanic_ash_air_concentration.time.values
+        if t not in tvals:
+           print('Met office time not found in dset', t, tvals)
+        try:
+            conc = self.dset.volcanic_ash_air_concentration.sel(time=t)
+        except:
+            print('unable to retrieve conc')
+            return False
         return conc
 
     def total_mass(self, time):
@@ -1061,74 +1113,3 @@ class MetOfficeHelper(DsetHelper):
         profile = conc_3d.isel(latitude=lat_idx, longitude=lon_idx)
         
         return alt, profile.values, actual_lon, actual_lat
-
-def get_vertical_slice_bounding_box(lon, alt, conc_2d, threshold):
-    """
-    Find bounding box around values above a given threshold in vertical slice data.
-    
-    Parameters:
-    lon (array): Longitude coordinates (1D array)
-    alt (array): Altitude coordinates (1D array) 
-    conc_2d (array): 2D concentration data (lon x alt or alt x lon)
-    threshold (float): Threshold value for concentration
-    
-    Returns:
-    dict: Dictionary containing bounding box information:
-        - 'lon_min': Minimum longitude with above-threshold values
-        - 'lon_max': Maximum longitude with above-threshold values  
-        - 'alt_min': Minimum altitude with above-threshold values
-        - 'alt_max': Maximum altitude with above-threshold values
-        - 'found': Boolean indicating if any above-threshold values were found
-        - 'indices': Dictionary with 'lon_indices' and 'alt_indices' arrays
-    """
-    if conc_2d is None:
-        return {
-            'lon_min': None, 'lon_max': None,
-            'alt_min': None, 'alt_max': None,
-            'found': False, 'indices': None
-        }
-    
-    # Ensure we have the right orientation - check if data matches coordinate dimensions
-    if conc_2d.shape == (len(alt), len(lon)):
-        # Data is (alt, lon) - transpose to (lon, alt) for consistency
-        conc_2d = conc_2d.T
-    elif conc_2d.shape != (len(lon), len(alt)):
-        raise ValueError(f"Data shape {conc_2d.shape} doesn't match coordinate shapes lon:{len(lon)}, alt:{len(alt)}")
-    
-    # Find locations where concentration exceeds threshold
-    above_threshold = conc_2d > threshold
-    
-    # Check if any values are above threshold
-    if not np.any(above_threshold):
-        return {
-            'lon_min': None, 'lon_max': None,
-            'alt_min': None, 'alt_max': None,
-            'found': False, 'indices': None
-        }
-    
-    # Get indices of above-threshold values
-    lon_indices, alt_indices = np.where(above_threshold)
-    
-    # Find bounding box in index space
-    lon_idx_min, lon_idx_max = np.min(lon_indices), np.max(lon_indices)
-    alt_idx_min, alt_idx_max = np.min(alt_indices), np.max(alt_indices)
-    
-    # Convert to coordinate space
-    lon_min, lon_max = lon[lon_idx_min], lon[lon_idx_max]
-    alt_min, alt_max = alt[alt_idx_min], alt[alt_idx_max]
-    
-    return {
-        'lon_min': lon_min,
-        'lon_max': lon_max, 
-        'alt_min': alt_min,
-        'alt_max': alt_max,
-        'found': True,
-        'indices': {
-            'lon_indices': lon_indices,
-            'alt_indices': alt_indices,
-            'lon_idx_min': lon_idx_min,
-            'lon_idx_max': lon_idx_max,
-            'alt_idx_min': alt_idx_min, 
-            'alt_idx_max': alt_idx_max
-        }
-    }
