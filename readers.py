@@ -742,38 +742,55 @@ class Comparison:
         keylist.append('volcat')       
  
         for iii, key in enumerate(keylist):
-            mass = data[key].massload(fdate)
-            mass = xr.where(mass < 0.01, np.nan, mass)
-            
-            if key == 'volcat':
-                lat = mass.latitude.values
-                lon = mass.longitude.values
-            else:
-                lat = data[key].latitude
-                lon = data[key].longitude
-            
-            # Keep data coordinates as they are - don't transform longitude
-            # The transform parameter handles the projection conversion
-            pcolormesh_obj = axlist[iii].pcolormesh(lon, lat, mass.values, cmap=cmap, norm=norm, transform=transform)
-            axlist[iii].plot(self.vloc[0],self.vloc[1],transform=transform,marker='^',color='r',markersize=10)
-            # Place the text in the upper left corner
-            lbl = key.upper()
+            try:
+                mass = data[key].massload(fdate)
+                mass = xr.where(mass < 0.01, np.nan, mass)
+                
+                if key == 'volcat':
+                    lat = mass.latitude.values
+                    lon = mass.longitude.values
+                else:
+                    lat = data[key].latitude
+                    lon = data[key].longitude
+                
+                # Keep data coordinates as they are - don't transform longitude
+                # The transform parameter handles the projection conversion
+                pcolormesh_obj = axlist[iii].pcolormesh(lon, lat, mass.values, cmap=cmap, norm=norm, transform=transform)
+                axlist[iii].plot(self.vloc[0],self.vloc[1],transform=transform,marker='^',color='r',markersize=10)
+                # Place the text in the upper left corner
+                lbl = key.upper()
 
-            axlist[iii].text(0.05, 0.95, lbl , transform=axlist[iii].transAxes, fontsize=12, color='k', va='top')
+                axlist[iii].text(0.05, 0.95, lbl , transform=axlist[iii].transAxes, fontsize=12, color='k', va='top')
 
-            # Set extent based on forecast time and transformed coordinates
-            if fdate == datetime.datetime(2021, 11, 3, 12):
-                # For T+0, focus on source region
-                axlist[iii].set_extent([150, 170, 50, 56], crs=transform)
-            elif fdate > datetime.datetime(2021, 11, 3, 18):
-                # For later times, show wider area as plume spreads
-                axlist[iii].set_extent([160, 190, 48, 56], crs=transform)
-            else:
-                # Default extent for intermediate times
-                axlist[iii].set_extent([150, 180, 48, 56], crs=transform)
-            
-            axlist[iii].set_xlabel('Longitude')
-            map_util.format_plot(axlist[iii], transform, fsz=12)
+                # Set extent based on forecast time and transformed coordinates
+                if fdate == datetime.datetime(2021, 11, 3, 12):
+                    # For T+0, focus on source region
+                    axlist[iii].set_extent([150, 170, 50, 56], crs=transform)
+                elif fdate > datetime.datetime(2021, 11, 3, 18):
+                    # For later times, show wider area as plume spreads
+                    axlist[iii].set_extent([160, 190, 48, 56], crs=transform)
+                else:
+                    # Default extent for intermediate times
+                    axlist[iii].set_extent([150, 180, 48, 56], crs=transform)
+                
+                axlist[iii].set_xlabel('Longitude')
+                map_util.format_plot(axlist[iii], transform, fsz=12)
+                
+            except Exception as e:
+                # Handle errors for individual datasets (especially volcat)
+                print(f"Error plotting {key}: {e}")
+                lbl = key.upper()
+                axlist[iii].text(0.5, 0.5, f'{lbl}\nError: Data not available', 
+                               transform=axlist[iii].transAxes, ha='center', va='center', fontsize=12)
+                axlist[iii].text(0.05, 0.95, lbl , transform=axlist[iii].transAxes, fontsize=12, color='k', va='top')
+                # Set same extent as other plots for consistency
+                if fdate == datetime.datetime(2021, 11, 3, 12):
+                    axlist[iii].set_extent([150, 170, 50, 56], crs=transform)
+                elif fdate > datetime.datetime(2021, 11, 3, 18):
+                    axlist[iii].set_extent([160, 190, 48, 56], crs=transform)
+                else:
+                    axlist[iii].set_extent([150, 180, 48, 56], crs=transform)
+                map_util.format_plot(axlist[iii], transform, fsz=12)
         
         # Create a dedicated axis for the colorbar
         if pcolormesh_obj is not None:
