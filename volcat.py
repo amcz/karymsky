@@ -1298,6 +1298,7 @@ def combine_regridded(vlist):
            corner of 20.25) then this will fail or produce unexpected results.
     """
     emptyvalue = xr.DataArray()
+    if len(vlist) == 0: return False
 
     # check range of longitude values.
     # from 0 to 360 or -180 to 180?
@@ -1391,7 +1392,9 @@ def combine_regridded(vlist):
         # this changes the x and y values that correspond to the lat lon values.
         # important because aligning with other grids is done with x and y since
         # they are integers. It is difficult to align with floats.
+        crnrlon = -179.875
         attrs = hysplit_gridutil.create_global_grid(dlat, dlon, crnrlon)
+        attrs = hysplit_gridutil.create_karymsky_grid(dlat, dlon, crnrlon)
         try:
             das = hysplit_gridutil.change_grid(das, attrs)
         except:

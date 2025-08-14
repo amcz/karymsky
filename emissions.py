@@ -34,7 +34,8 @@ def process_noaa(df):
     df.columns=columns
     df['psize'] = 1
     df['ht'] = df['ht']*1000
-    df2 = df[['date','ht','mass','psize']]
+    df['top'] = df['top']*1000
+    df2 = df[['date','ht','top','mass','psize']]
     return df2 
 
 def process(df):
@@ -56,7 +57,8 @@ def process(df):
     df['mass'] = df['rate']*3600
     df['psize'] = 1
     df['ht'] = df['ht']*1000
-    df2 = df[['date','ht','mass','psize']]
+    df['top'] = df['top']*1000
+    df2 = df[['date','ht','top','mass','psize']]
     return df2
 
 def get_met_emission_files(tdir='/hysplit3/alicec/projects/karymsky/', version='m0'):
@@ -80,10 +82,14 @@ def get_met_emission_files(tdir='/hysplit3/alicec/projects/karymsky/', version='
         tdir = os.path.join(tdir, 'MetOffice_results_Feb2025/')
     elif version=='m0':
         tdir = os.path.join(tdir,'MetOffice_results/')
-    elif version=='n0':
+    elif version in ['n0','na']:
         tdir = os.path.join(tdir, 'HYSPLIT_results/')
         
     fff = glob.glob(tdir + '*csv')
+    if version == 'n0':
+        fff = [x for x in fff if 'forecast' in x]
+    elif version == 'na':
+        fff = [x for x in fff if 'apriori'  in x]
     return fff
     #df = pd.read_csv(f[10])
     #df2 = process(df)
@@ -106,10 +112,55 @@ def get_met_emissions(iii):
     df = pd.read_csv(fff[iii])
     df2 = process(df)
     return df2
-    
+
+
+def plot_emission_profiles(version='m0', nlist=None, edate=None,unit='mer'):
+    fff = get_met_emission_files(version=version)
+    fff.sort()
+    if not nlist: nlist = np.arange(0,len(fff)+1)  
+    cm = colormaker.ColorMaker('viridis',len(nlist)+1,ctype='rgb')
+    clrs = cm()
+    dlist = [datetime.datetime(2021,11,3,7)] 
+    for i in range(1,6):
+        dlist.append(dlist[-1] + datetime.timedelta(hours=1))
+    n = len(dlist)
+    fig, axs = plt.subplots(1, n, figsize=(5*n,10))
+    ccc = 0
+    for iii, f in enumerate(fff):
+        if iii not in nlist: continue
+        df = pd.read_csv(f)
+        if 'm' in version:
+            df2 = process(df)
+        elif 'n' in version:
+            df2 = process_noaa(df)
+        for ddd, ax in zip(dlist, axs):
+            dstr = ddd.strftime("%Y-%m-%d %H:%M:00")
+            df3 = df2[df2['date'] == dstr]
+            if not df3.empty:
+                plottcm.plot_emissions_profile(df3,marker='.',clr=clrs[ccc],ax=ax, unit=unit)
+        ccc+=1
+    for ddd, ax in zip(dlist, axs):
+        ax.set_title(f"{ddd}")
+    axs[0].set_ylabel('altitude (km asl)',fontsize=15)
+
+
+
+def time2label(ttt):
+    if ttt=='202111030900': return 'forecast_1'
+    if ttt=='202111031200': return 'forecast_2'
+    if ttt=='202111031800': return 'forecast_3'
+    if ttt=='202111040000': return 'forecast_4'
+    if ttt=='202111040600': return 'forecast_5' 
+    if ttt=='202111041200': return 'forecast_6' 
+    if ttt=='202111041800': return 'forecast_7' 
+    if ttt=='202111050000': return 'forecast_8' 
+    if ttt=='202111050600': return 'forecast_9' 
+    if ttt=='202111051200': return 'forecast_10' 
+    if ttt=='202111051800': return 'forecast_11' 
+    return ttt
 
 # plot emissions from UK met office
-def plot_met_emissions(version='m0'):
+def plot_met_emissions(version='m0',nlist=None, edate=None):
     """
     Plot emissions data from Met Office or NOAA.
     
@@ -135,28 +186,34 @@ def plot_met_emissions(version='m0'):
     ax2 = fig.add_subplot(1,2,2)
     fff = get_met_emission_files(version=version)
     fff.sort()
-    if 'm' in version:
-        qqq = fff[0:8]
-    else:
-        qqq = fff
+    qqq = fff
     cm = colormaker.ColorMaker('viridis',len(qqq),ctype='rgb')
     clrs = cm()
-
+    
+    if not nlist: nlist = np.arange(0,len(fff)+1)  
     for iii, f in enumerate(qqq):
+        if iii not in nlist: continue
         label = f.split('/')[-1]
         label = label.split('_')[-1]
         label = label.replace('.csv','')
+        label = time2label(label)
         #label = datetime.datetime.strptime(label, '%Y%m%d%H%M')
         #label = label.strftime('%d %b %H:%M UTC')
-        print(iii, f)
         df = pd.read_csv(f)
         if 'm' in version:
             df2 = process(df)
         elif 'n' in version:
             df2 = process_noaa(df)
-        
-        plottcm.plot_emissions_timeseries(df2,marker='.',log=True,ax=ax,clr=clrs[iii],label=label)
-        plottcm.plot_emissions_profile(df2,marker='.',clr=clrs[iii],ax=ax2)
+        if edate:
+            print(df2['date'].unique())
+            print(type(df2['date'].unique()[0]))
+            df3 = df2[df2['date'] == edate]
+        else:
+            df3 = df2
+        if not df3.empty:
+            print(df3)
+            plottcm.plot_emissions_timeseries(df2,marker='.',log=True,ax=ax,clr=clrs[iii],label=label)
+            plottcm.plot_emissions_profile(df3,marker='.',clr=clrs[iii],ax=ax2)
 
     for label in ax.get_xticklabels():
         label.set_rotation(45)

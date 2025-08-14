@@ -331,6 +331,19 @@ def compare_grids_compat(c1in, c2in,tol=1e-4,verbose=False):
        return False
     return True
 
+def create_karymsky_grid(dlat,dlon,crnrlon):
+    # create a global grid.
+    nlat = np.ceil(90.0/dlat) + 1
+    nlon = np.ceil(360.0/dlon) + 1
+    attrs = {'llcrnr latitude'   : 0.125,
+             'llcrnr longitude'  : crnrlon,
+             'Latitude Spacing'  : dlat,
+             'Longitude Spacing' : dlon,
+             'Number Lat Points' : nlat,
+             'Number Lon Points' : nlon}
+    return attrs
+
+
 def create_global_grid(dlat,dlon,crnrlon):
     # create a global grid.
     nlat = np.ceil(180.0/dlat) + 1

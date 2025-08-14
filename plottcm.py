@@ -153,9 +153,36 @@ def plot_emissions_timeseries(
 
 
 
+def plot_emissions_profile(dfdat,ax,clr='k',label=None,alpha=0.5,marker='o',lw=4, unit='mer'):
+    df = dfdat
+    prev_top = 0
+    prev_x =0
+    for iii, row in df.iterrows():
+        y1 = row['ht']/1000
+        y2 = row['top']/1000
+        if unit == 'Tg':
+            x1 = row['mass'] / 1e12 #convert to Tg
+        elif unit == 'mer':
+            x1 = row['mass'] / 1000 / 3600 # convert to kg/s
+        ax.plot([x1,x1],[y1,y2], color=clr, alpha=alpha, label=label,lw=lw)
+        ax.plot([x1,x1],[y1,y2], color=clr, alpha=alpha, label=label,lw=lw)
+        if prev_top == y1:
+            ax.plot([prev_x,x1],[y1,y1], color=clr, alpha=alpha, label=label,lw=lw)
+        else:
+            ax.plot([0,prev_x], [prev_top,prev_top], alpha=alpha,lw=lw, color=clr)
+            ax.plot([0,x1], [y1,y1], color=clr, alpha=alpha, label=label,lw=lw)
+        prev_x = x1
+        prev_top = y2
+    if unit == 'mer':
+        ax.set_xscale('log')
+        ax.set_xlim(1, 10e5)
+        ax.set_xlabel('MER (kg/s)', fontsize=15)
+    else:
+        ax.set_xlabel('Mass (Tg)', fontsize=15)
+    ax.plot([0,prev_x], [prev_top,prev_top], alpha=alpha,lw=lw, color=clr)
+    
 
-
-def plot_emissions_profile(
+def plot_emissions_profile_old(
     dfdat, fignum=1, unit="km", ax=None, clr="k", label=None, alpha=1, lw=1, marker="o"
 ):
     if not ax:
