@@ -189,7 +189,7 @@ def load_obs(filename,clear_sky=False,obsfreq=3600,data_select='Ash_conc_mean'):
     #print(fname)
     #print(fname.split('.csv')[0])
     filesuffix = filename.rpartition(".")[0]
-    time = filesuffix.split('_')[2]   
+    time = filesuffix.split('_')[3]   
     filetime = dt.datetime.strptime(time,'%Y%m%d%H%M')
     time_coord = [filetime - dt.timedelta(seconds=3600),filetime]
     
