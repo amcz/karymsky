@@ -1,7 +1,7 @@
 import datetime
 import matplotlib.pyplot as plt
 import numpy as np
-from readers import format_cdf_plot
+from karymsky.io.readers import format_cdf_plot
 
 def plot_cdf_multipanel(comparison, issue_date, minval=0.01, figsize=(15, 12)):
     """

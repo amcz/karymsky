@@ -8,9 +8,9 @@ import xarray as xr
 import pandas as pd
 
 import get_area
-from compare_hysplit_volcat import volcat_mass
-from utilhysplit.evaluation import statmain
-from plotutils import map_util
+from karymsky.io.volcat_helper import volcat_mass
+#from utilhysplit.evaluation import statmain
+#from plotutils import map_util
 
 """
 
@@ -186,6 +186,7 @@ class NOAA(BaseNetCDF):
         Parameters:
         tdir (str): Directory containing the NetCDF files.
         """
+        self.set_type('apriori')
         super().__init__(tdir)
 
     def set_type(self,runtype):
@@ -299,13 +300,15 @@ class NoaaHelper(DsetHelper):
         tuple: (longitude, altitude, concentration_2d, actual_latitude)
         """
         # Get 3D concentration data
+        print('here') 
         mass_4d = self.dset.HYSPLIT.sel(time=time)
         
         # Find closest latitude
-        lats = self.dset.HYSPLIT.isel(x=0).values 
+        lats = mass_4d.isel(x=0).latitude.values 
         #lats = self.latitude
         #if lats.ndim > 1:
         #    lats = lats[:, 0] if lats.shape[1] < lats.shape[0] else lats[0, :]
+        print('here', type(lats), lats) 
         
         lat_diff = np.abs(lats - latitude_target)
         lat_idx = np.argmin(lat_diff)
