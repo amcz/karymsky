@@ -3,7 +3,6 @@ import os
 
 import numpy as np
 
-import volcat
 
 
 def get_volcat_1h(tdir, d1, d2):
