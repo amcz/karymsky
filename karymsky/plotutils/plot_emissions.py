@@ -15,18 +15,41 @@ from karymsky.io import emissions
 from karymsky.plotutils import colormaker, plottcm
 
 
-def plot_emission_profiles(version="m0", nlist=None, edate=None, unit="mer"):
+def emit2csv(emit):
+    from utilhysplit import emitimes
+    return -1
+
+
+def compare_emission_profiles(versions=["m0","na"], nlist=[0], edate=None, unit="mer"):
+    fff = emissions.get_met_emission_files(version=versions[0])
+    fff.sort()
+    cmaplist = ['viridis','spring']
+    if not nlist:
+        nlist = np.arange(0, len(fff) + 1)
+    dlist = [datetime.datetime(2021, 11, 3, 7)]
+    for _ in range(1, 6):
+        dlist.append(dlist[-1] + datetime.timedelta(hours=1))
+    n = len(dlist)
+    fig, axs = plt.subplots(1, n, figsize=(5 * n, 10)) 
+    for ver_i, version in enumerate(versions):
+        plot_emission_profiles(version=version, nlist=nlist, edate=edate, unit=unit, axs=axs, cmap=cmaplist[ver_i])
+
+
+def plot_emission_profiles(version="m0", nlist=None, edate=None, unit="mer", axs=None, cmap='viridis'):
     fff = emissions.get_met_emission_files(version=version)
     fff.sort()
     if not nlist:
         nlist = np.arange(0, len(fff) + 1)
-    cm = colormaker.ColorMaker("viridis", len(nlist) + 1, ctype="rgb")
+    cm = colormaker.ColorMaker(cmap, len(nlist) + 1, ctype="rgb")
     clrs = cm()
     dlist = [datetime.datetime(2021, 11, 3, 7)]
     for _ in range(1, 6):
         dlist.append(dlist[-1] + datetime.timedelta(hours=1))
     n = len(dlist)
-    fig, axs = plt.subplots(1, n, figsize=(5 * n, 10))
+    if axs is None:
+        fig, axs = plt.subplots(1, n, figsize=(5 * n, 10))
+    else:
+        fig = axs[0].figure
     ccc = 0
     for iii, f in enumerate(fff):
         if iii not in nlist:
@@ -47,7 +70,7 @@ def plot_emission_profiles(version="m0", nlist=None, edate=None, unit="mer"):
     for ddd, ax in zip(dlist, axs):
         ax.set_title(f"{ddd}")
     axs[0].set_ylabel("altitude (km asl)", fontsize=15)
-
+    return fig, axs 
 
 def time2label(ttt):
     if ttt == "202111030900":
