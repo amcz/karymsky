@@ -347,6 +347,8 @@ class Comparison:
         n_datasets = len(available_datasets)
         ncols = min(2, n_datasets)
         nrows = (n_datasets + ncols - 1) // ncols
+        nrows = 1
+        ncols = 3
 
         fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
         if n_datasets == 1:
@@ -356,6 +358,8 @@ class Comparison:
         else:
             axes = axes.flatten()
 
+        vhelper = data['volcat']
+        vslice = vhelper.vertical_slice(time, latitude_target)
         # Plot each dataset
         for i, key in enumerate(available_datasets):
             if i < len(axes):
@@ -399,6 +403,7 @@ class Comparison:
 
                 except Exception as eee:
                     print("problem with pcolormesh", eee)
+                ax.plot(vslice[0], vslice[1], color='r', linestyle='--', label='Volcat Slice')
                 # ----------------------------------------------------------------------------------------------
                 try:
                     # Add colorbar
