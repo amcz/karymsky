@@ -112,6 +112,35 @@ class Comparison:
             ax.step(sdata, yval, "-" + clrs[key], label=key)
         ax.set_xscale("log")
 
+    def get_extents(self, fdate):
+        if fdate <= datetime.datetime(2021, 11, 3, 12):
+            extent = [150, 170, 50, 56]
+        elif fdate <= datetime.datetime(2021, 11, 3, 18):
+            extent = [150, 180, 48, 56]
+        elif fdate <= datetime.datetime(2021, 11, 4, 0):
+            extent = [155, 185, 48, 56]
+        elif fdate <= datetime.datetime(2021, 11, 4, 6):
+            extent = [160, 190, 48, 56]
+        elif fdate <= datetime.datetime(2021, 11, 4, 12):
+            extent = [160, 195, 46, 56]
+        elif fdate <= datetime.datetime(2021, 11, 4, 18):
+            extent = [160, 200, 46, 58]
+        elif fdate <= datetime.datetime(2021, 11, 5, 0):
+            extent = [160, 205, 44, 58]
+        elif fdate <= datetime.datetime(2021, 11, 5, 6):
+            extent = [160, 210, 44, 60]
+        elif fdate <= datetime.datetime(2021, 11, 5, 12):
+            extent = [160, 215, 42, 60]
+        elif fdate <= datetime.datetime(2021, 11, 5, 18):
+            extent = [160, 220, 42, 62]
+        elif fdate <= datetime.datetime(2021, 11, 20, 18):
+            extent = [160, 220, 42, 62]
+        else:
+            extent = [150, 180, 48, 56]
+        return extent
+
+    
+
     def plot_mass(self, date, fdate):
         """
         Plot the mass loading for different datasets.
@@ -358,6 +387,8 @@ class Comparison:
         else:
             axes = axes.flatten()
 
+        extent = self.get_extents(time)
+
         vhelper = data['volcat']
         vslice = vhelper.vertical_slice(time, latitude_target)
         # Plot each dataset
@@ -408,7 +439,7 @@ class Comparison:
                 try:
                     # Add colorbar
                     cbar = plt.colorbar(im, ax=ax)
-                    cbar.set_label("Concentration (g/m³)", fontsize=10)
+                    cbar.set_label("Concentration (mg/m³)", fontsize=10)
 
                     # Set labels and title
                     ax.set_xlabel("Longitude (°)", fontsize=12)
@@ -430,7 +461,8 @@ class Comparison:
                     )
                     ax.set_title(f"{key.upper()}\nError", fontsize=12)
                 # ----------------------------------------------------------------------------------------------
-
+                ax.set_xlim([extent[0], extent[1]])
+                ax.set_ylim([0,600])
         # Hide unused subplots
         for i in range(n_datasets, len(axes)):
             axes[i].set_visible(False)
