@@ -91,7 +91,6 @@ class BaseNetCDF:
         for iii in np.arange(6, 56, 6):
             dt = datetime.timedelta(hours=int(iii))
             dlist.append(d + dt)
-            print(d+dt)
         return dlist
 
 class MetOffice(BaseNetCDF):
@@ -171,7 +170,7 @@ class Bom(BaseNetCDF):
         namehash = {}
         for ddd in self.forecast_times():
             dstr = ddd.strftime("%Y%m%dT%H%MZ")
-            namehash[ddd] = f'forecast_{dstr}.nc'
+            namehash[ddd] = f'forecast_{dstr}_gl.nc'
         return namehash
 
 class NOAA(BaseNetCDF):
@@ -204,6 +203,9 @@ class NOAA(BaseNetCDF):
         """
         dset = self.get_forecast(date)
         return NoaaHelper(dset)
+
+         
+
 
     def names(self):
         """
@@ -261,6 +263,38 @@ class NoaaHelper(DsetHelper):
         """
         return self.dset.longitude.values
 
+    def concentration(self,time):
+        # check if dset is an xarray Dataset
+        if not isinstance(self.dset, xr.Dataset):
+            print('Dataset is not an xarray Dataset')
+            return None
+        if 'HYSPLIT' not in self.dset:
+            print('HYSPLIT variable not found in dataset')
+            return None
+        timevalues = [pd.to_datetime(x) for x in self.dset.HYSPLIT.time.values]
+        if time not in timevalues:
+           print('NOAA time not available', time, timevalues)
+        # convert to mg/m3
+        conc = self.dset.HYSPLIT.sel(time=time)*1000
+        return conc
+
+    def maxconc(self,time):
+        # check if dset is an xarray Dataset
+        if not isinstance(self.dset, xr.Dataset):
+            print('Dataset is not an xarray Dataset')
+            return None
+        if 'HYSPLIT' not in self.dset:
+            print('HYSPLIT variable not found in dataset')
+            return None
+        timevalues = [pd.to_datetime(x) for x in self.dset.HYSPLIT.time.values]
+        if time not in timevalues:
+           print('NOAA time not available', time, timevalues)
+        # convert to mg/m3
+        conc = self.dset.HYSPLIT.sel(time=time)*1000
+        conc = conc.isel(ens=0,source=0).max(dim='z')
+        return conc
+         
+
     def massload(self, time):
         """
         Calculate the mass loading for a specific time.
@@ -300,7 +334,6 @@ class NoaaHelper(DsetHelper):
         tuple: (longitude, altitude, concentration_2d, actual_latitude)
         """
         # Get 3D concentration data
-        print('here') 
         mass_4d = self.dset.HYSPLIT.sel(time=time)
         
         # Find closest latitude
@@ -308,7 +341,6 @@ class NoaaHelper(DsetHelper):
         #lats = self.latitude
         #if lats.ndim > 1:
         #    lats = lats[:, 0] if lats.shape[1] < lats.shape[0] else lats[0, :]
-        print('here', type(lats), lats) 
         
         lat_diff = np.abs(lats - latitude_target)
         lat_idx = np.argmin(lat_diff)
@@ -415,6 +447,15 @@ class BomHelper(DsetHelper):
             print('times in file', stamps)
             iii = -1
         return iii
+
+    def maxconc(self,time):
+        t = self.convert_time(time)
+        if t>=0:
+           conc = self.dset.concentration.isel(time=t)
+           cmax = conc.max(dim='levels')
+           return cmax
+        else:
+           return None
 
     def massload(self, time):
         """
@@ -596,6 +637,8 @@ class VolcatData:
             self.datahash[d1] = mass
             self.hthash[d1] = ht
 
+        
+
     def massload(self, time):
         """
         Get the mass loading for a specific time.
@@ -646,6 +689,11 @@ class MetOfficeHelper(DsetHelper):
         numpy.ndarray: Array of longitude values.
         """
         return self.dset.longitude
+
+    def maxconc(self,time):
+        conc = self.concentration(time)
+        conc = conc.max(dim='flight_level')
+        return conc
 
     def massload(self, time):
         """

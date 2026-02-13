@@ -65,7 +65,7 @@ def process_noaa(df):
     pandas.DataFrame
         Processed DataFrame with standardized columns: date, ht, mass, psize
     """
-    columns = ['date','mass','width','lat','lon','ht','top','duration','rate']
+    columns = ['date','mass','width','lat','lon','top','ht','duration','rate']
     df.columns=columns
     df['psize'] = 1
     df['ht'] = df['ht']*1000

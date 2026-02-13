@@ -166,6 +166,7 @@ def plot_emissions_profile(dfdat,ax,clr='k',label=None,alpha=0.5,marker='o',lw=4
             x1 = row['mass'] / 1000 / 3600 # convert to kg/s
         ax.plot([x1,x1],[y1,y2], color=clr, alpha=alpha, label=label,lw=lw)
         ax.plot([x1,x1],[y1,y2], color=clr, alpha=alpha, label=label,lw=lw)
+        #print(y1, y2, prev_top)
         if prev_top == y1:
             ax.plot([prev_x,x1],[y1,y1], color=clr, alpha=alpha, label=label,lw=lw)
         else:
@@ -176,9 +177,9 @@ def plot_emissions_profile(dfdat,ax,clr='k',label=None,alpha=0.5,marker='o',lw=4
     if unit == 'mer':
         ax.set_xscale('log')
         ax.set_xlim(1, 10e5)
-        ax.set_xlabel('MER (kg/s)', fontsize=15)
+        ax.set_xlabel('MER (kg/s)', fontsize=25)
     else:
-        ax.set_xlabel('Mass (Tg)', fontsize=15)
+        ax.set_xlabel('Mass (Tg)', fontsize=25)
     ax.plot([0,prev_x], [prev_top,prev_top], alpha=alpha,lw=lw, color=clr)
     
 

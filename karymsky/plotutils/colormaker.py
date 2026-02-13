@@ -4,6 +4,27 @@ import matplotlib
 
 #logger = logging.getLogger(__name__)
 
+def get_qva_colors_rgb():
+        """@brief Get standard QVA (Volcanic Ash Advisory) colors
+        @return List of tuples with (linecolor, hexcolor) for light blue, orange, red, purple
+        """
+        # QVA colors in RGB
+        colors = [
+            (207, 199, 198),   # Light gray
+            (105, 105, 105),   # Dark gray (added)
+            (160, 210, 255),   # Light blue
+            (255, 153, 0),     # Orange
+            (255, 40, 0),      # Red
+            (170, 0, 170),     # Purple
+            (227, 15, 242)     # Pink
+        ]
+        alpha = 200  # C8 in decimal
+        def rgb_to_rgba_hex(r, g, b, a=alpha):
+            return f"#{r:02X}{g:02X}{b:02X}{a:02X}"
+        clist = [rgb_to_rgba_hex(r, g, b) for (r, g, b) in colors]
+        return clist
+
+
 class ConcplotColors:
     def __init__(self):
         colorhash = {}
@@ -84,3 +105,37 @@ class ColorMaker:
         #        self.clist.append(self.rgb_to_hex(cmap(iii)))
         #    else:
         #        self.clist.append(cmap[iii])
+
+
+
+def get_vaa_colors():
+    """
+    @brief Returns list of RGB colors used in Volcanic Ash Advisory graphics
+    @return List of RGB tuples for: light blue, orange, red, purple
+    """
+    return [
+        (160, 210, 255),  # Light blue
+        (255, 153, 0),    # Orange
+        (255, 40, 0),     # Red
+        (170, 0, 170)     # Purple
+    ]
+
+def get_vaa_colors_hex():
+    """
+    @brief Returns list of hex colors used in Volcanic Ash Advisory graphics
+    @return List of hex strings for: light blue, orange, red, purple
+    """
+    return [
+        "#A0D2FF",  # Light blue
+        "#FF9900",  # Orange
+        "#FF2800",  # Red
+        "#AA00AA"   # Purple
+    ]
+
+def get_vaa_colors_kml():
+    """
+    @brief Returns list of KML colors used in Volcanic Ash Advisory graphics
+    @return List of KML strings for: light blue, orange, red, purple
+    """
+    clrs = get_vaa_colors()
+    return [color2kml(x) for x in clrs]

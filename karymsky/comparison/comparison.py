@@ -2,10 +2,14 @@ import datetime
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+import matplotlib.colors as mcolors
+import pandas as pd
 
-from utilhysplit.evaluation import statmain
-from plotutils import map_util
+from karymsky.utilhysplit import hysplit_gridutil as hgu
+from karymsky.utilhysplit.evaluation import statmain, plume_stat
+from karymsky.plotutils import map_util, colormaker
 from karymsky.io.readers import NOAA, MetOffice, Bom, VolcatData
+
 
 """
 comparison.py - Compare different volcanic ash datasets
@@ -17,6 +21,88 @@ Extracted from readers.py for better code organization.
 23 Dec 2026 (amc) started fixing vertical slice plot
 
 """
+
+def print_fss_nicely(fss, columns=None, floatfmt=".3f", max_rows=20):
+    """
+    Print the FSS DataFrame in a readable, nicely formatted way.
+    Args:
+        fss (pd.DataFrame): The FSS DataFrame to print.
+        columns (list, optional): Columns to display. If None, show all.
+        floatfmt (str): Format for floating point numbers.
+        max_rows (int): Maximum number of rows to display.
+    """
+    import pandas as pd
+    if columns is not None:
+        df = fss[columns].copy()
+    else:
+        df = fss.copy()
+    with pd.option_context('display.max_rows', max_rows, 'display.max_columns', None, 'display.float_format', lambda x: f"{x:{floatfmt}}"):
+        print(df)
+
+def matchra(ra1, ra2):
+    """
+    Align two xarray DataArrays on a regular lat/lon grid by creating
+    a common x, y index array that covers both arrays (outer join).
+
+   Assumes latitude(y, x) and longitude(y, x) are 2-D but regular.
+    """
+    new1, new2 = hgu.align(ra1, ra2, verbose=True)
+    return new1, new2
+
+
+def latlon_da_to_xy(da, lat_name="latitude", lon_name="longitude"):
+    """
+    Convert a regular lat/lon DataArray to y/x indexed grid.
+    Preserves coordinates and builds grid attributes.
+    """
+
+    lat = da[lat_name].values
+    lon = da[lon_name].values
+
+    # --- sanity checks (trust but verify) ---
+    if not (np.all(np.diff(lat) > 0) and np.all(np.diff(lon) > 0)):
+        raise ValueError("Latitude/longitude must be monotonic increasing")
+
+    dlat = float(np.median(np.diff(lat)))
+    dlon = float(np.median(np.diff(lon)))
+
+    # skeptical consistency check
+    if not np.allclose(np.diff(lat), dlat, atol=1e-4):
+        print("Warning: latitude spacing not perfectly uniform")
+    if not np.allclose(np.diff(lon), dlon, atol=1e-4):
+        print("Warning: longitude spacing not perfectly uniform")
+
+    attrs = {
+        "llcrnr latitude": float(lat[0]),
+        "llcrnr longitude": float(lon[0]),
+        "Latitude Spacing": dlat,
+        "Longitude Spacing": dlon,
+        "Number Lat Points": len(lat),
+        "Number Lon Points": len(lon),
+    }
+    lon2d, lat2d = np.meshgrid(lon,lat)
+
+    # --- rename dims ---
+    da2 = da.rename({lat_name: "y", lon_name: "x"})
+
+    ny = len(lat)
+    nx = len(lon)
+
+     # --- assign index coords ---
+    da2 = da2.assign_coords(
+        y=np.arange(1,ny+1),
+        x=np.arange(1,nx+1),
+        latitude=(("y","x"), lat2d),
+        longitude=(("y","x"), lon2d),
+    )
+
+    da2.attrs.update(attrs)
+
+    return da2
+
+
+
+    
 
 
 class Comparison:
@@ -88,7 +174,7 @@ class Comparison:
         self.volcat.get(date)
         self.datahash[date]["volcat"] = self.volcat
 
-    def plot_mass_cdf(self, issue_date, forecast_date, minval=0.01, ax=None):
+    def plot_mass_cdf(self, issue_date, forecast_date, minval=0.01, ax=None,conc=False):
         """
         Plot the CDF of mass loading.
 
@@ -104,7 +190,10 @@ class Comparison:
         data = self.datahash[issue_date]
         clrs = self.colorhash
         for key in data.keys():
-            mass = data[key].massload(forecast_date)
+            if not conc:
+                mass = data[key].massload(forecast_date)
+            else:
+                mass = data[key].maxconc(forecast_date)
             m = mass.values
             m = m[~np.isnan(m)]
             m = m[m > minval]
@@ -139,9 +228,85 @@ class Comparison:
             extent = [150, 180, 48, 56]
         return extent
 
-    
 
-    def plot_mass(self, date, fdate):
+    def get_csi(self,ftime=0, threshold=0.2, sz=1):
+        dflist = []
+        ftimes = self.forecast_times
+        ftimes = ftimes[1:]
+        for fget in ftimes:
+            print('working on', fget)
+            forecast = fget + datetime.timedelta(hours=ftime)
+            if forecast > datetime.datetime(2021,11,5,18): continue
+            shash = self.score_object(fget,forecast,threshold=threshold)
+            for key in shash.keys():
+                ct = shash[key].get_contingency_table(clip=True, sz=sz)
+                csi = shash[key].table2csi(ct)
+                csi['center'] = key
+                csi['time'] = fget
+                csi['ftime'] = forecast
+                csi['tplus'] = ftime
+                csi['threshold'] = threshold
+                dflist.append(csi)
+        csi = pd.concat(dflist)
+        return csi
+
+    def build_eval(self,thresholdlist=[0.2,0.5,2], ftime=0, szra=[1,3,5,7,10]):
+        dflist = []
+        csilist = []
+        flist = []
+        ftimes = self.forecast_times
+        ftimes = ftimes[1:]
+        for threshold in thresholdlist:
+            for fget in ftimes:
+                print('working on', fget)
+                forecast = fget + datetime.timedelta(hours=ftime)
+                if forecast > datetime.datetime(2021,11,5,18): continue
+                shash = self.score_object(fget,forecast,threshold=threshold)
+                for key in shash.keys():
+                    ac = shash[key].calc_accuracy_measures(threshold=threshold) 
+                    ct = shash[key].get_contingency_table(clip=True)
+                    fss = shash[key].calc_fss(szra=szra)
+                    fss['center'] = key
+                    fss['time'] = fget
+                    fss['ftime'] = forecast
+                    fss['tplus'] = ftime
+                    fss['threshold'] = threshold
+                    flist.append(fss)
+                    #contingency[key] = ct
+                    csi = shash[key].table2csi(ct)
+                    csi['center'] = key
+                    csi['time'] = fget
+                    csi['ftime'] = forecast
+                    csi['tplus'] = ftime
+                    csi['threshold'] = threshold
+                    csilist.append(csi)
+                    ac['center'] = key
+                    ac['time'] = fget
+                    ac['ftime'] = forecast
+                    ac['tplus'] = ftime
+                    ac['threshold'] = threshold
+                    dflist.append(ac)
+        acc = pd.concat(dflist)
+        csi = pd.concat(csilist)
+        fss = pd.concat(flist)
+        return acc, csi, fss
+
+    def score_object(self,date,fdate, threshold=0.2):
+        scorehash = {}
+        data = self.datahash[date]
+        vmass = self.datahash[date]['volcat'].massload(time=fdate)
+        keylist = [x for x in data.keys() if 'volcat' not in x]
+        for key in keylist:
+            print('working on ', key)
+            mass = data[key].massload(fdate)
+            if key in  ['metoffice','bom']:
+                mass = latlon_da_to_xy(mass)
+            obs, mod = matchra(vmass,mass)
+            scorehash[key] = plume_stat.CalcScores(obs, mod, threshold=threshold, clip=20)
+        return scorehash
+
+
+    def plot_mass(self, date, fdate,conc=False):
         """
         Plot the mass loading for different datasets.
 
@@ -149,7 +314,6 @@ class Comparison:
         date (datetime): The date of the T+0 in the forecast
         fdate (datetime): The forecast date.
         """
-        import matplotlib.colors as mcolors
 
         data = self.datahash[date]
         fig, axlist = map_util.setup_figure(
@@ -167,7 +331,10 @@ class Comparison:
         keylist = [x for x in keylist if "volcat" not in x]
         for key in keylist:
             # print(list(data[key].massload.keys()))
-            mass = data[key].massload(fdate)
+            if not conc:
+                mass = data[key].massload(fdate)
+            else:
+                mass = data[key].maxconc(fdate)
             mass = xr.where(mass < 0.01, np.nan, mass)
             all_masses.append(np.nanmax(mass.values))
         # vmass = data['volcat'].datahash[fdate]
@@ -175,12 +342,15 @@ class Comparison:
 
         global_max = np.max(all_masses)
         if global_max > 10:
-            bounds = [0.01, 0.05, 0.2, 2, 5, 10, global_max]
+            bounds = [0.01, 0.1, 0.2, 2, 5, 10, global_max]
         else:
-            bounds = [0.01, 0.05, 0.2, 2, 5, 9.90, 10]
+            bounds = [0.01, 0.1, 0.2, 2, 5, 10,50]
 
-        norm = mcolors.BoundaryNorm(boundaries=bounds, ncolors=len(bounds))
-        cmap = plt.get_cmap("viridis", 5)
+        #norm = mcolors.BoundaryNorm(boundaries=bounds, ncolors=len(bounds))
+        #cmap = plt.get_cmap("viridis", 5)
+        colors = colormaker.get_qva_colors_rgb()
+        cmap = mcolors.ListedColormap(colors)
+        norm = mcolors.BoundaryNorm(boundaries=bounds, ncolors=len(colors))
 
         # Store the pcolormesh objects for colorbar
         pcolormesh_obj = None
@@ -188,7 +358,11 @@ class Comparison:
 
         for iii, key in enumerate(keylist):
             try:
-                mass = data[key].massload(fdate)
+                if not conc:
+                    mass = data[key].massload(fdate)
+                else:
+                    if key=='volcat': continue
+                    mass = data[key].maxconc(fdate)
                 mass = xr.where(mass < 0.01, np.nan, mass)
 
                 if key == "volcat":
@@ -223,45 +397,8 @@ class Comparison:
                     color="k",
                     va="top",
                 )
-
-                # Set extent based on forecast time and transformed coordinates
-                if fdate <= datetime.datetime(2021, 11, 3, 12):
-                    # T+0: Focus on source region
-                    axlist[iii].set_extent([150, 170, 50, 56], crs=transform)
-                elif fdate <= datetime.datetime(2021, 11, 3, 18):
-                    # T+6: Plume begins to spread eastward
-                    axlist[iii].set_extent([150, 180, 48, 56], crs=transform)
-                elif fdate <= datetime.datetime(2021, 11, 4, 0):
-                    # T+12: Wider eastward spread
-                    axlist[iii].set_extent([155, 185, 48, 56], crs=transform)
-                elif fdate <= datetime.datetime(2021, 11, 4, 6):
-                    # T+18: Further eastward movement
-                    axlist[iii].set_extent([160, 190, 48, 56], crs=transform)
-                elif fdate <= datetime.datetime(2021, 11, 4, 12):
-                    # T+24: Continued eastward spread
-                    axlist[iii].set_extent([160, 195, 46, 56], crs=transform)
-                elif fdate <= datetime.datetime(2021, 11, 4, 18):
-                    # T+30: Maximum eastward extent
-                    axlist[iii].set_extent([160, 200, 46, 58], crs=transform)
-                elif fdate <= datetime.datetime(2021, 11, 5, 0):
-                    # T+36: Far field dispersion
-                    axlist[iii].set_extent([160, 205, 44, 58], crs=transform)
-                elif fdate <= datetime.datetime(2021, 11, 5, 6):
-                    # T+42: Extended far field
-                    axlist[iii].set_extent([160, 210, 44, 60], crs=transform)
-                elif fdate <= datetime.datetime(2021, 11, 5, 12):
-                    # T+48: Very far field
-                    axlist[iii].set_extent([160, 215, 42, 60], crs=transform)
-                elif fdate <= datetime.datetime(2021, 11, 5, 18):
-                    # T+54: Maximum extent
-                    axlist[iii].set_extent([160, 220, 42, 62], crs=transform)
-                elif fdate <= datetime.datetime(2021, 11, 20, 18):
-                    # T+54: Maximum extent
-                    axlist[iii].set_extent([160, 220, 42, 62], crs=transform)
-                else:
-                    # Default extent for any other times
-                    axlist[iii].set_extent([150, 180, 48, 56], crs=transform)
-
+                extent = self.get_extents(fdate)
+                axlist[iii].set_extent(extent, crs=transform)
                 axlist[iii].set_xlabel("Longitude")
                 map_util.format_plot(axlist[iii], transform, fsz=12)
 
@@ -288,39 +425,8 @@ class Comparison:
                     va="top",
                 )
                 # Set same extent as other plots for consistency
-                if fdate == datetime.datetime(2021, 11, 3, 12):
-                    # T+0: Focus on source region
-                    axlist[iii].set_extent([150, 170, 50, 56], crs=transform)
-                elif fdate == datetime.datetime(2021, 11, 3, 18):
-                    # T+6: Plume begins to spread eastward
-                    axlist[iii].set_extent([150, 180, 48, 56], crs=transform)
-                elif fdate == datetime.datetime(2021, 11, 4, 0):
-                    # T+12: Wider eastward spread
-                    axlist[iii].set_extent([155, 185, 48, 56], crs=transform)
-                elif fdate == datetime.datetime(2021, 11, 4, 6):
-                    # T+18: Further eastward movement
-                    axlist[iii].set_extent([160, 190, 48, 56], crs=transform)
-                elif fdate == datetime.datetime(2021, 11, 4, 12):
-                    # T+24: Continued eastward spread
-                    axlist[iii].set_extent([165, 195, 46, 56], crs=transform)
-                elif fdate == datetime.datetime(2021, 11, 4, 18):
-                    # T+30: Maximum eastward extent
-                    axlist[iii].set_extent([170, 200, 46, 58], crs=transform)
-                elif fdate == datetime.datetime(2021, 11, 5, 0):
-                    # T+36: Far field dispersion
-                    axlist[iii].set_extent([175, 205, 44, 58], crs=transform)
-                elif fdate == datetime.datetime(2021, 11, 5, 6):
-                    # T+42: Extended far field
-                    axlist[iii].set_extent([180, 210, 44, 60], crs=transform)
-                elif fdate == datetime.datetime(2021, 11, 5, 12):
-                    # T+48: Very far field
-                    axlist[iii].set_extent([185, 215, 42, 60], crs=transform)
-                elif fdate == datetime.datetime(2021, 11, 5, 18):
-                    # T+54: Maximum extent
-                    axlist[iii].set_extent([190, 220, 42, 62], crs=transform)
-                else:
-                    # Default extent for any other times
-                    axlist[iii].set_extent([150, 180, 48, 56], crs=transform)
+                extent = self.get_extents(fdate)
+                axlist[iii].set_extent(extent, crs=transform)
                 map_util.format_plot(axlist[iii], transform, fsz=12)
 
         # Create a dedicated axis for the colorbar
@@ -331,9 +437,19 @@ class Comparison:
             cbar_ax = fig.add_axes(
                 [0.87, 0.15, 0.03, 0.7]
             )  # [left, bottom, width, height]
-            fig.colorbar(pcolormesh_obj, cax=cbar_ax, label="Mass Loading (g m$^{-2}$)")
+            if conc:
+                fig.colorbar(pcolormesh_obj, cax=cbar_ax, label="max concentration (mg m$^{-3}$)")
+            else: 
+                fig.colorbar(pcolormesh_obj, cax=cbar_ax, label="Mass Loading (g m$^{-2}$)")
 
-        axlist[0].set_title(f'{fdate.strftime("%Y-%m-%d %H:%M")}')
+
+        hours = fdate - date
+        hours = int(hours.seconds / 3600)
+        
+
+        axlist[0].set_title(f'T+{hours}, Forecast time {fdate.strftime("%Y-%m-%d %H:%M")}',fontsize=14)
+        axlist[1].set_title(f'Issue time {date.strftime("%Y-%m-%d %H:%M")}',fontsize=14)
+        
 
         return fig, axlist
 
@@ -344,7 +460,7 @@ class Comparison:
         latitude_target,
         figsize=(15, 10),
         min_conc=1e-6,
-        log_scale=True,
+        log_scale=False,
         cmap="viridis",
     ):
         """
@@ -389,6 +505,7 @@ class Comparison:
 
         extent = self.get_extents(time)
 
+        # volcat data
         vhelper = data['volcat']
         vslice = vhelper.vertical_slice(time, latitude_target)
         # Plot each dataset
@@ -402,48 +519,52 @@ class Comparison:
                     lon, alt, conc_2d, actual_lat = helper.vertical_slice(
                         time, latitude_target
                     )
+                    print('MAX', np.max(conc_2d))
                 except:
                     print("problem with vertical slice for", key)
                 # ----------------------------------------------------------------------------------------------
                 try:
                     if conc_2d is not None:
-                        print("creating meshgrid")
                         # Create meshgrid for plotting
+                        lon =  lon %360  # Ensure longitudes are in 0-360 range                        
                         lon_mesh, alt_mesh = np.meshgrid(lon, alt)
 
                         # Mask values below minimum concentration
                         # conc_masked = np.where(conc_2d.T > min_conc, conc_2d.T, np.nan)
                         conc_masked = np.where(conc_2d > min_conc, conc_2d, np.nan)
-
                         # Set up color scale
-                        if log_scale:
-                            from matplotlib.colors import LogNorm
+                        #if log_scale:
+                        #    from matplotlib.colors import LogNorm
 
-                            norm = LogNorm(vmin=min_conc, vmax=np.nanmax(conc_masked))
-                        else:
-                            norm = plt.Normalize(
-                                vmin=min_conc, vmax=np.nanmax(conc_masked)
-                            )
+                        #    norm = LogNorm(vmin=min_conc, vmax=np.nanmax(conc_masked))
+                        #else:
+                        #    print('min conc', min_conc, np.nanmax(conc_masked))
+                        #    norm = plt.Normalize(
+                        #        vmin=min_conc, vmax=np.nanmax(conc_masked)
+                        #    )
 
                 except Exception as eee:
                     print("problem with plotting for", key, eee)
                     # Create the plot
                 # ----------------------------------------------------------------------------------------------
-                try:
-                    im = ax.pcolormesh(lon, alt, conc_masked, cmap=cmap)
-
-                except Exception as eee:
-                    print("problem with pcolormesh", eee)
-                ax.plot(vslice[0], vslice[1], color='r', linestyle='--', label='Volcat Slice')
+                levels = [0.01, 0.1, 0.2, 2, 5, 10,50]
+                colors = colormaker.get_qva_colors_rgb()
+                cmap = mcolors.ListedColormap(colors)
+                norm = mcolors.BoundaryNorm(boundaries=levels, ncolors=len(colors))
+                im = ax.pcolormesh(lon, alt, conc_masked, cmap=cmap, norm=norm)
+                #im = ax.pcolormesh(lon_mesh, alt_mesh, conc_masked, cmap=cmap)
+                
+                ax.plot(vslice[0]%360, vslice[1], color='r', linestyle='--', label='Volcat Slice')
                 # ----------------------------------------------------------------------------------------------
                 try:
+                    if i == len(axes) - 1:
                     # Add colorbar
-                    cbar = plt.colorbar(im, ax=ax)
-                    cbar.set_label("Concentration (mg/m³)", fontsize=10)
+                        cbar = plt.colorbar(im, ax=ax)
+                        cbar.set_label("Concentration (mg/m³)", fontsize=10)
+                        ax.set_ylabel("Altitude (m)", fontsize=12)
 
                     # Set labels and title
                     ax.set_xlabel("Longitude (°)", fontsize=12)
-                    ax.set_ylabel("Altitude (m)", fontsize=12)
                     ax.set_title(f"{key.upper()}\nLat: {actual_lat:.2f}°N", fontsize=12)
                     ax.grid(True, alpha=0.3)
                     # ax.text(0.5, 0.5, f'No data available\nfor {key.upper()}',
@@ -460,18 +581,29 @@ class Comparison:
                         va="center",
                     )
                     ax.set_title(f"{key.upper()}\nError", fontsize=12)
-                # ----------------------------------------------------------------------------------------------
+                #
+                extent[0] = extent[0]%360
+                extent[1] = extent[1]%360
                 ax.set_xlim([extent[0], extent[1]])
                 ax.set_ylim([0,600])
         # Hide unused subplots
         for i in range(n_datasets, len(axes)):
             axes[i].set_visible(False)
 
-        plt.suptitle(
+        for i in range(len(axes)):
+            if i!=0: 
+                axes[i].set_ylabel('')
+                # set only the tick labels to empty. keep ticks.
+                axes[i].set_yticklabels([])
+            else: axes[i].set_ylabel('Altitude (FL)') 
+            axes[i].set_xlabel('Longitude (°)',fontsize=15)
+
+        # Adjust layout to reserve space for suptitle
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
+        fig.suptitle(
             f'Vertical Cross-Sections at {latitude_target}°N\n{time.strftime("%Y-%m-%d %H:%M")}',
-            fontsize=14,
+            fontsize=12,
         )
-        plt.tight_layout()
         return fig, axes
 
     def plot_vertical_profiles(
