@@ -23,7 +23,6 @@ Class:
          calc_roc: calculates the relative operating characteristics
          get_contingency_table: puts contingency table together for further calculations
          table2csi:
-         calc_csi (critical success index, aka figure of merit in space or Threat Score)
          calc_heidke (heidke skill score)
          calc_fss (fraction skill score)
          calc_pcorr (pattern correlation coefficient)
@@ -153,7 +152,6 @@ class CalcScores:
         calc_roc: calculates the relative operating characteristics
         get_contingency_table: puts contingency table together for further calculations
         table2csi:
-        calc_csi: calculates the critical success index (gilbert score), probability of detection, false alarm rate, etc.
         calc_fss: calculates the fractions skill score
         calc_pcorr: calculates pattern correlation coefficient (Pearson correlation coefficient)
         
@@ -181,6 +179,10 @@ class CalcScores:
         #                 added  prob2det method
         #                 added sz argument to calc_roc, get_contingency_table, calc_basics
         # 2021 Sept 21 AMR added calc_heidke function
+        # 2025 Jan  30 AMC removed calc_csi. only need table2csi.
+        # 2025 Jan  30 AMC added ability to handle data that crosses the -180, 180 line by using roll method for xarray.
+
+        #
 
         self.xra1 = xra1
         self.xra2 = xra2
@@ -202,10 +204,8 @@ class CalcScores:
         # self.calc_basics()
 
         if clip>0:
-           #self.binxra1, self.binxra2 = self.clip_with_margin(self.binxra1, self.binxra2,int(clip))
            self.binxra1, self.binxra2, shift = self.seam_safe_union_clip(self.binxra1, self.binxra2,margin=int(clip))
-
-           print('clipped with shift:', shift)
+           if verbose: print('clipped with shift:', shift)
 
 
     def verbose_grid_check(self,a1, a2, xdim="x", ydim="y", lon_name="longitude"):
@@ -339,6 +339,7 @@ class CalcScores:
 
 
 
+    # redundant older function
     def clip_with_margin(self, a1, a2, margin=20):
 
         # union mask of nonzero cells
@@ -368,7 +369,7 @@ class CalcScores:
         return a1c, a2c
 
 
-
+    # redundant older function
     def clip(self, binxra1, binxra2):
         temp = xr.concat([binxra1, binxra2], dim='temp')
         temp = xr.where(temp == 0, np.nan, temp)
@@ -507,23 +508,42 @@ class CalcScores:
 
     def calc_basics(self, probthresh=None, clip=False, sz=1, obsprob=False):
         """
-        probthresh : int or float
-        clip : boolean. If True then remove 
+        Calculate basic contingency arrays for categorical skill metrics.
 
-        sz : int. neighborhood size to use for convolution. If 1 then no convolution.
+        Parameters
+        ----------
+        probthresh : int or float, optional
+            Probability threshold for converting probabilistic forecasts to deterministic (binary) forecasts.
+            If set, forecast grid cells with probability >= probthresh are considered 'yes' events.
+            Useful for ROC/PR curve analysis. If None, no thresholding is applied.
+        clip : bool, optional
+            If True, apply clipping to the arrays (details depend on implementation).
+        sz : int, optional
+            Neighborhood size for convolution. If sz == 1, no convolution is performed and each grid cell is evaluated independently.
+            If sz > 1, a moving window of size sz x sz is used to smooth the binary arrays, and a cell is considered 'yes' if any cell in the neighborhood meets the criteria.
+            This is used for neighborhood-based skill metrics (e.g., FSS).
+        obsprob : bool, optional
+            If True, apply probability thresholding to observations (details depend on implementation).
 
-        The probthresh can be used to convert probabilistic forecasts back to
-        deterministic forecasts.
-        This can be used for creating things like ROC diagrams.
+        Inputs
+        ------
+        self.binxra1 : xarray.DataArray
+            Binary observation array (1 for event, 0 for no event).
+        self.binxra2 : xarray.DataArray
+            Binary forecast array (1 for event, 0 for no event).
 
-        self.binxra1 input
-        self.binxra2 input
-
-        self.match   output both model and obs
-        self.arr1    output only observations
-        self.arr2    output only model
-        self.arr3    output no model or obs
-        self.total_points
+        Outputs
+        -------
+        self.match : xarray.DataArray
+            Grid cells where both model and observation indicate 'yes' (hits).
+        self.arr1 : xarray.DataArray
+            Grid cells where only observation indicates 'yes' (misses).
+        self.arr2 : xarray.DataArray
+            Grid cells where only model indicates 'yes' (false alarms).
+        self.arr3 : xarray.DataArray
+            Grid cells where both model and observation indicate 'no' (correct negatives).
+        self.total_points : int
+            Total number of grid cells evaluated.
 
         """
         binxra2 = self.binxra2.copy()
@@ -1006,83 +1026,6 @@ class CalcScores:
                                           (row['a']+row['c']+row['b']+row['d']), axis=1)
         return tframe
 
-    def calc_csi(self, verbose=False):
-        """ CSI equation: hits / (hits + misses + false alarms) - aka Gilbert Score
-        or Threat Score
-        Inputs:
-        match: hits
-        arr1: misses
-        arr2: false alarms
-        area: optional array of grid areas, must be same size as xra1 and xra2 (default = None)
-        nodata: flag for expanded array grid cells created if ash near boundary (string)
-        multi: Boolean - calculations for each ensemble member and total ensemble
-        dframe: Boolean - output as pandas dataframe if desired
-        verbose: boolean
-        Output:
-        csihash: Dictionary of values pertaining to Critical Success Index calculation - can output dataframe if desired
-        contains: hits, misses, false_alarms, CSI, POD, FAR
-        """
-        area = np.array(self.area, dtype='object')
-        # Getting contingency table from get_contingency_table()
-        # tframe = self.get_contingency_table(multi=multi)
-        csihash = {}
-        # Assigning a, b, and c arrays to csihash dictionary
-        # Made these single values, rather than arrays - AMR 6/4/2021
-        csihash['hits'] = self.match.sum().values
-        csihash['misses'] = self.arr1.sum().values
-        csihash['false_alarms'] = self.arr2.sum().values
-        csihash['d'] = self.arr3.sum().values      # d correctly forecast no ash.
-
-        if area.shape == self.match.shape:
-            csihash['CSI'] = ((self.match*self.area).sum() / ((self.match*self.area).sum() +
-                                                              (self.arr1*self.area).sum() + (self.arr2*self.area).sum())).values
-            csihash['POD'] = ((self.match*self.area).sum() /
-                              ((self.match*self.area).sum() + (self.arr1*area).sum())).values
-            csihash['FAR'] = ((self.arr2*self.area).sum() /
-                              ((self.match*self.area).sum() + (self.arr2*area).sum())).values
-            # Added 6/3/21 - AMR
-            csihash['Events'] = (self.match*self.area).sum() + (self.arr1*self.area).sum()
-            csihash['Total'] = self.allpts
-            csihash['Freq'] = csihash['Events'].values / csihash['Total'].values
-            csihash['Posit'] = (self.match*self.area).sum() + (self.arr2*self.area).sum()
-            csihash['Chance'] = csihash['Posit'].values*csihash['Freq'].values
-            csihash['GSS'] = ((self.match*self.area).sum()-csihash['Chance'].values) / ((csihash['Posit'].values +
-                                                                                         csihash['Events'].values - (self.match*self.area).sum()) - csihash['Chance'].values)
-
-            if self.verbose == True:
-                print('used area')
-                print((self.match*self.area).sum().values, (self.arr1 *
-                                                            self.area).sum().values, (self.arr2*self.area).sum().values)
-                print('CSI: ', csihash['CSI'].values, 'POD: ',
-                      csihash['POD'].values, 'FAR: ', csihash['FAR'].values, 'Frequency: ', csihash['Freq'].values, 'Gilbert Skill Score: ', csihash['GSS'].values)
-        else:
-            csihash['CSI'] = self.match.sum() / (self.match.sum() + self.arr1.sum() + self.arr2.sum())
-            # hit rate or probability of detection (p 310 Wilks) a/(a+c)
-            csihash['POD'] = self.match.sum() / (self.match.sum() + self.arr1.sum())
-            # false alarm ratio (p 310 Wilks) b/(a+b)
-            # proportion of positive forecasts which were wrong.
-            csihash['FAR'] = self.arr2.sum() / (self.match.sum() + self.arr2.sum())
-            # false alarm rate (p 311 Wilks) b/(d+b)
-            # ratio of false alarms to total number of non-occurences.
-            csihash['F'] = self.arr2.sum() / (self.arr2.sum() + self.arr3.sum())
-            # Added 6/3/21 - AMR
-            csihash['Events'] = (self.match.sum() + self.arr1.sum()).values
-            csihash['Total'] = self.allpts
-            csihash['Freq'] = csihash['Events'] / csihash['Total']
-            csihash['Posit'] = (self.match.sum() + self.arr2.sum()).values
-            csihash['Chance'] = csihash['Posit']*csihash['Freq']
-            csihash['GSS'] = ((self.match.sum()-csihash['Chance']) / (self.arr1.sum() +
-                                                                      self.arr2.sum() + self.match.sum() - csihash['Chance'])).values
-            if self.verbose == True:
-                print('Match: ', self.match.sum().values, 'Misses: ',
-                      self.arr1.sum().values, 'FalseAlarms: ', self.arr2.sum().values)
-            if verbose:
-                print('CSI: {:.3f}'.format(csihash['CSI'].values),
-                      'POD: {:.3f}'.format(csihash['POD'].values),
-                      'FAR: {:.3f}'.format(csihash['FAR'].values),
-                      'F  : {:.3f}'.format(csihash['F'].values),
-                      'GSS  : {:.3f}'.format(csihash['GSS']))
-        return csihash
 
     def calc_heidke(self):
         """ Calculates the Heidke Skill Score from the 2x2 contingency table
@@ -1108,11 +1051,13 @@ class CalcScores:
 
         return arr1, arr2
 
-    def calc_fss(self, szra=None, makeplots=False):
+    def calc_fss(self, szra=None, makeplots=False, stopping_diff=0.01):
         """Calculates the fraction skill score(fss)
         See Robers and Lean(2008) Monthly Weather Review
         and Schwartz et al(2010) Weather and Forecasting
         for more information.
+
+                
 
         Can plot fractions if desired(double check calculations)
         szra: a list of the number of pixels(neightborhood length) to use
@@ -1193,17 +1138,31 @@ class CalcScores:
                 print('size ', sz)
             fss_tmp = dict({'Nlen': conv_array[0], 'FBS': fbs, 'FBS_ref': fbs_ref, 'FSS': fss})
             if makeplots == True:
+                import matplotlib.gridspec as gridspec
                 sns.set()
-                fig = plt.figure(1, figsize=(10, 15))
-                ax1 = fig.add_subplot(1, 2, 1)
-                ax2 = fig.add_subplot(1, 2, 2)
-                cb = ax1.imshow(frac_arr1)
-                cb2 = ax2.imshow(frac_arr2)
-                #plt.colorbar(cb, ax=ax1)
-                #plt.colorbar(cb2)
+                sns.set_style("whitegrid")
+                fig = plt.figure(figsize=(12, 5))
+                gs = gridspec.GridSpec(1, 3, width_ratios=[1, 1, 0.05], wspace=0.3)
+                ax1 = fig.add_subplot(gs[0, 0])
+                ax2 = fig.add_subplot(gs[0, 1])
+                cax = fig.add_subplot(gs[0, 2])
+                cmap = 'viridis'
+                cmap = 'Greys'
+                vmax = np.max([np.max(frac_arr1), np.max(frac_arr2)])
+                im1 = ax1.imshow(frac_arr1, vmax=vmax, vmin=0.0001, cmap=cmap)
+                im2 = ax2.imshow(frac_arr2, vmax=vmax, vmin=0.0001, cmap=cmap)
+                fig.colorbar(im2, cax=cax)
+                print('NLEN', sz)
+                fig.suptitle(f'Nlen = {sz}')
+                ax1.set_title('fraction observerd')
+                ax2.set_title('fraction modeled')
+                plt.tight_layout()
+                plt.savefig(f'fss_plot_nlen_{sz:03d}.png')
                 plt.show()
 
             fss_dict[sz] = fss_tmp
+            if afss-fss < stopping_diff: break
+            
 
         df = pd.DataFrame.from_dict(fss_dict, orient='index')
         df['random'] = random_fss

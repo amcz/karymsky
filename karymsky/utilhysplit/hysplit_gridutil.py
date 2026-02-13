@@ -55,7 +55,9 @@ def align(ds1, ds2, tol=0.02,verbose=False):
         elon = np.max([elon1,elon2])
 
         if verbose:
-           print(clat,elat, clon, elon)
+           print('CHOOSE CLAT', clat1, clat2, clat)
+           print('CHOOSE CLON', clon1, clon2, clon)
+           print('FINAL', clat,elat, clon, elon)
         
 
         newgrid = create_rect_grid(dlat, dlon, llcrnr_lat=clat, llcrnr_lon=clon,
